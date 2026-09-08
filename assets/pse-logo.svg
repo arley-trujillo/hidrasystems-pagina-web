@@ -1,0 +1,24 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(170 150) rotate(48) scale(336 336)">
+      <stop stop-color="#2E67C7"/>
+      <stop offset="1" stop-color="#0B326A"/>
+    </radialGradient>
+    <linearGradient id="cart" x1="72" y1="256" x2="162" y2="256" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F6B21A"/>
+      <stop offset="1" stop-color="#FFCC4D"/>
+    </linearGradient>
+  </defs>
+  <circle cx="256" cy="256" r="224" fill="url(#bg)"/>
+  <path d="M84 236H120L141 282H330" stroke="url(#cart)" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M129 236L170 184H233" stroke="url(#cart)" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="156" cy="342" r="18" fill="url(#cart)"/>
+  <circle cx="263" cy="342" r="18" fill="url(#cart)"/>
+  <circle cx="146" cy="196" r="14" fill="url(#cart)"/>
+  <circle cx="181" cy="166" r="14" fill="url(#cart)"/>
+  <circle cx="216" cy="140" r="14" fill="url(#cart)"/>
+  <path d="M203 240C203 228 212 219 224 219H281C300 219 315 233 315 251C315 269 300 283 281 283H248C237 283 229 291 229 301C229 311 237 319 248 319H324" stroke="#F4F7FB" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M333 219H374C393 219 408 233 408 251C408 269 393 283 374 283H333" stroke="#F4F7FB" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M334 283V219" stroke="#F4F7FB" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M248 319H364" stroke="#F4F7FB" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

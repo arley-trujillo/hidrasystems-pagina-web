@@ -16,7 +16,7 @@
     <meta property="og:image" content="logo.png" />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
-    <link rel="icon" href="logo.png" />
+    <link rel="icon" href="/logo.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -339,8 +339,42 @@
         </div>
       </section>
     </div>
-    <script src="./config.js"></script>
-    <script src="./negocio-app.js"></script>
+    <script src="/config.js"></script>
+    <script>
+      (function () {
+        var parts = String(window.location.pathname || "/").split("/").filter(Boolean);
+        var firstSegment = String(parts[0] || "").toLowerCase();
+        var isRetailRoute = firstSegment === "negocio" || firstSegment === "retail";
+        var isPublicRaffleRoute = parts.length === 1 && firstSegment && firstSegment !== "index.html";
+
+        if (!isPublicRaffleRoute || isRetailRoute) return;
+
+        window.__PUBLIC_SITE_CONFIG__ = {
+          apiBaseUrl: String(window.HIDRA_API_BASE_URL || "").trim(),
+          mode: "raffles"
+        };
+
+        document.documentElement.lang = "es";
+        document.body.className = "";
+        document.body.innerHTML = "<div id=\"app\"><div class=\"loading-shell\"><div class=\"loading-card\"><div class=\"loading-badge\">Cargando sitio publico</div><h1>Preparando tu pagina de rifas</h1><p>Estamos leyendo la configuracion del sorteo.</p></div></div></div>";
+
+        var font = document.createElement("link");
+        font.rel = "stylesheet";
+        font.href = "https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;700;800;900&display=swap";
+        document.head.appendChild(font);
+
+        var stylesheet = document.createElement("link");
+        stylesheet.rel = "stylesheet";
+        stylesheet.href = "/raffles.css";
+        document.head.appendChild(stylesheet);
+
+        var app = document.createElement("script");
+        app.defer = true;
+        app.src = "/raffles-app.js";
+        document.head.appendChild(app);
+      })();
+    </script>
+    <script src="/negocio-app.js"></script>
   </body>
 </html>
 
