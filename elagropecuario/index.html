@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0f172a" />
+    <title>El Agropecuario</title>
+    <link rel="icon" href="/logo.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;700;800;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/raffles.css" />
+    <script src="/config.js"></script>
+    <script>
+      window.__PUBLIC_SITE_CONFIG__ = {
+        apiBaseUrl: String(window.HIDRA_API_BASE_URL || "").trim(),
+        mode: "raffles"
+      };
+    </script>
+    <script defer src="/raffles-app.js"></script>
+  </head>
+  <body>
+    <div id="app">
+      <div class="loading-shell">
+        <div class="loading-card">
+          <div class="loading-badge">Cargando sitio publico</div>
+          <h1>Preparando tu pagina de rifas</h1>
+          <p>Estamos leyendo la configuracion del sorteo.</p>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
