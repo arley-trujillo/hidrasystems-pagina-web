@@ -34,9 +34,12 @@ async function fetchPublicSitePayload(slug) {
     await waitForPublicSiteRetry(PUBLIC_SITE_RETRY_DELAYS_MS[attempt] || 0);
 
     try {
-      const retryQuery = attempt > 0 ? `?retry=${attempt}` : "";
+      const query = new URLSearchParams({ deferMedia: "1" });
+      if (attempt > 0) {
+        query.set("retry", String(attempt));
+      }
       const response = await fetch(
-        `${API_BASE_URL}/public-site/${encodeURIComponent(normalizedSlug)}${retryQuery}`,
+        `${API_BASE_URL}/public-site/${encodeURIComponent(normalizedSlug)}?${query.toString()}`,
         { cache: "no-store" },
       );
 
@@ -61,6 +64,122 @@ async function fetchPublicSitePayload(slug) {
   throw lastError || new Error("No fue posible cargar el sitio publico.");
 }
 
+async function fetchDeferredPublicPayload(pathname) {
+  try {
+    const response = await fetch(`${API_BASE_URL}${pathname}`, { cache: "no-store" });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    return payload && typeof payload === "object" ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+function applyDeferredImageSource(selector, source) {
+  if (!source) return;
+  app.querySelectorAll(selector).forEach((image) => {
+    image.setAttribute("src", String(source));
+  });
+}
+
+function applyDeferredPublicMedia(site, media = {}) {
+  const coversByRaffleId = new Map(
+    asArray(media?.raffles)
+      .filter((item) => item?.raffleId && item?.coverImageUrl)
+      .map((item) => [String(item.raffleId), item.coverImageUrl]),
+  );
+  const logo = media?.settings?.logoUrl || media?.company?.logo || "";
+  const heroImage = media?.settings?.heroImageUrl || "";
+
+  applyDeferredImageSource("[data-public-logo]", logo);
+  applyDeferredImageSource("[data-public-hero-image]", heroImage);
+  app.querySelectorAll("[data-public-raffle-image]").forEach((image) => {
+    const source = coversByRaffleId.get(String(image.dataset.publicRaffleImage || ""));
+    if (source) image.setAttribute("src", String(source));
+  });
+
+  const hydratedSite = {
+    ...site,
+    company: { ...site.company, logo: media?.company?.logo || site?.company?.logo || null },
+    settings: {
+      ...site.settings,
+      logoUrl: media?.settings?.logoUrl || site?.settings?.logoUrl || null,
+      heroImageUrl: media?.settings?.heroImageUrl || site?.settings?.heroImageUrl || null,
+    },
+    activeRaffles: asArray(site.activeRaffles).map((raffle) => {
+      const coverImageUrl = coversByRaffleId.get(String(raffle?.campaign?.id || raffle?.campaignId || ""));
+      if (!coverImageUrl) return raffle;
+      return {
+        ...raffle,
+        publicConfig: { ...raffle.publicConfig, coverImageUrl },
+      };
+    }),
+  };
+
+  if (window.__PUBLIC_SITE_STATE__?.slug === normalizeSlug(getSlugFromLocation())) {
+    window.__PUBLIC_SITE_STATE__.site = hydratedSite;
+    raffleSelectorState.site = hydratedSite;
+    publicChatState.site = hydratedSite;
+  }
+}
+
+function applyDeferredWinnerVideoThumbnails(site, payload = {}) {
+  const thumbnailsByVideoId = new Map(
+    asArray(payload?.winnerVideos)
+      .filter((video) => video?.id && video?.thumbnailUrl)
+      .map((video) => [String(video.id), video.thumbnailUrl]),
+  );
+
+  app.querySelectorAll("[data-public-video-thumbnail]").forEach((image) => {
+    const source = thumbnailsByVideoId.get(String(image.dataset.publicVideoThumbnail || ""));
+    if (source) image.setAttribute("src", String(source));
+  });
+
+  if (window.__PUBLIC_SITE_STATE__?.slug === normalizeSlug(getSlugFromLocation())) {
+    window.__PUBLIC_SITE_STATE__.site = {
+      ...(window.__PUBLIC_SITE_STATE__.site || site),
+      winnerVideos: asArray(payload?.winnerVideos),
+    };
+  }
+}
+
+function scheduleDeferredPublicMedia(site, slug) {
+  const normalizedSlug = normalizeSlug(slug);
+  if (!normalizedSlug) return;
+
+  const loadCoreMedia = async () => {
+    const media = await fetchDeferredPublicPayload(`/public-site/${encodeURIComponent(normalizedSlug)}/media`);
+    if (media && window.__PUBLIC_SITE_STATE__?.slug === normalizedSlug) {
+      applyDeferredPublicMedia(site, media);
+    }
+  };
+
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(() => { void loadCoreMedia(); }, { timeout: 1200 });
+  } else {
+    window.setTimeout(() => { void loadCoreMedia(); }, 320);
+  }
+
+  const loadWinnerVideos = async () => {
+    const payload = await fetchDeferredPublicPayload(`/public-site/${encodeURIComponent(normalizedSlug)}/winner-videos`);
+    if (payload && window.__PUBLIC_SITE_STATE__?.slug === normalizedSlug) {
+      applyDeferredWinnerVideoThumbnails(site, payload);
+    }
+  };
+  const videosSection = app.querySelector("#videos");
+  if (!videosSection || typeof window.IntersectionObserver !== "function") {
+    window.setTimeout(() => { void loadWinnerVideos(); }, 1800);
+    return;
+  }
+
+  const observer = new IntersectionObserver((entries) => {
+    if (!entries.some((entry) => entry.isIntersecting)) return;
+    observer.disconnect();
+    void loadWinnerVideos();
+  }, { rootMargin: "420px 0px" });
+  observer.observe(videosSection);
+}
+
 const PUBLIC_SITE_MODE = (() => {
   const configured = String((window.__PUBLIC_SITE_CONFIG__ || {}).mode || "").trim().toLowerCase();
   if (configured === "retail" || configured === "raffles") {
@@ -74,7 +193,7 @@ const PUBLIC_SITE_MODE = (() => {
 
   return "raffles";
 })();
-const PUBLIC_SITE_CACHE_PREFIX = "public-site-cache:v1:";
+const PUBLIC_SITE_CACHE_PREFIX = "public-site-cache:v2:";
 const RAFFLE_SELECTOR_SEARCH_DELAY_MS = 1500;
 const ASSETS = {
   brand: "/assets/logo-placeholder.webp",
@@ -804,7 +923,7 @@ function renderVideoCards(videos = [], kind = "winner", layout = "grid") {
           return `
             <article class="card">
               <div class="card-media">
-                <img src="${escapeHtml(preview)}" alt="${escapeHtml(video.title)}" loading="lazy" decoding="async" />
+                <img data-public-video-thumbnail="${escapeAttr(String(video.id || ""))}" src="${escapeHtml(preview)}" alt="${escapeHtml(video.title)}" loading="lazy" decoding="async" />
                 ${video.videoUrl ? `
                   <button
                     type="button"
@@ -1116,7 +1235,7 @@ function renderPublicChatWidget(site, slug) {
       <section class="public-chat-panel" data-public-chat-panel hidden aria-label="Chat de ${escapeAttr(companyName)}">
         <header class="public-chat-header">
           <div class="public-chat-avatar" aria-hidden="true">
-            <img src="${escapeAttr(site?.settings?.logoUrl || site?.company?.logo || ASSETS.brand)}" alt="" />
+            <img data-public-logo src="${escapeAttr(site?.settings?.logoUrl || site?.company?.logo || ASSETS.brand)}" alt="" />
           </div>
           <div>
             <strong>${escapeHtml(companyName)}</strong>
@@ -1842,7 +1961,7 @@ function renderRaffles(site) {
       return `
         <article class="raffle-feature">
           <div class="raffle-feature-media">
-            <img src="${escapeHtml(image)}" alt="${escapeHtml(heroTitle)}" loading="eager" fetchpriority="high" decoding="async" />
+            <img data-public-raffle-image="${escapeAttr(String(campaign?.id || ""))}" src="${escapeHtml(image)}" alt="${escapeHtml(heroTitle)}" loading="eager" fetchpriority="high" decoding="async" />
             <div class="raffle-feature-badge">${isFeatured ? "Sorteo destacado" : "Sorteo disponible"}</div>
           </div>
             <div class="raffle-feature-body">
@@ -1878,7 +1997,7 @@ function renderRaffles(site) {
     return `
       <article class="raffle-card raffle-card-compact">
         <div class="raffle-card-media">
-          <img src="${escapeHtml(image)}" alt="${escapeHtml(heroTitle)}" loading="lazy" decoding="async" />
+          <img data-public-raffle-image="${escapeAttr(String(campaign?.id || ""))}" src="${escapeHtml(image)}" alt="${escapeHtml(heroTitle)}" loading="lazy" decoding="async" />
           ${isFeatured ? `<div class="card-flag">Destacado</div>` : ""}
         </div>
         <div class="raffle-card-body">
@@ -1923,7 +2042,7 @@ function renderRaffles(site) {
     return `
       <article class="raffle-carousel-card">
         <div class="raffle-carousel-card-media">
-          <img src="${escapeHtml(image)}" alt="${escapeHtml(heroTitle)}" loading="${index === 0 ? "eager" : "lazy"}" fetchpriority="${index === 0 ? "high" : "auto"}" decoding="async" />
+          <img data-public-raffle-image="${escapeAttr(String(campaign?.id || ""))}" src="${escapeHtml(image)}" alt="${escapeHtml(heroTitle)}" loading="${index === 0 ? "eager" : "lazy"}" fetchpriority="${index === 0 ? "high" : "auto"}" decoding="async" />
           <div class="raffle-carousel-card-badge">${index === 0 ? "Sorteo destacado" : "Sorteo activo"}</div>
         </div>
         <div class="raffle-carousel-card-body">
@@ -5354,6 +5473,9 @@ function renderShell(site, slug) {
     ? (getRaffleDisplayDescription(featuredRaffle) || "Compra segura y numeros visibles en tiempo real.")
     : (settings.heroOverlayText || "Compra segura y numeros visibles en tiempo real.");
   const heroSpotlightImage = featuredRaffle ? getRaffleDisplayImage(featuredRaffle, site) : heroImage;
+  const heroSpotlightMediaAttribute = featuredRaffle
+    ? `data-public-raffle-image="${escapeAttr(String(featuredRaffle?.campaign?.id || ""))}"`
+    : "data-public-hero-image";
   const heroSpotlightLabel = featuredRaffle ? "Sorteo destacado" : "Compra segura";
   const heroSpotlightLabelClass = featuredRaffle ? "overlay-label overlay-label-featured" : "overlay-label";
   const heroGreeting = "";
@@ -5397,7 +5519,7 @@ function renderShell(site, slug) {
           <div class="topbar-main">
             <div class="brand">
               <div class="brand-mark" style="width: clamp(104px, 10vw, 136px); height: clamp(104px, 10vw, 136px); border-radius: 24px; padding: 6px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); box-shadow: 0 10px 22px rgba(8,25,47,0.18); overflow: hidden; box-sizing: border-box; flex: 0 0 auto;">
-              <img src="${escapeHtml(settings.logoUrl || company.logo || ASSETS.brand)}" alt="${escapeHtml(company.nombre || settings.title || "Logo")}" loading="eager" decoding="async" style="width:100%;height:100%;object-fit:contain;object-position:center center;display:block;transform: scale(1.16);transform-origin:center center;" />
+              <img data-public-logo src="${escapeHtml(settings.logoUrl || company.logo || ASSETS.brand)}" alt="${escapeHtml(company.nombre || settings.title || "Logo")}" loading="eager" decoding="async" style="width:100%;height:100%;object-fit:contain;object-position:center center;display:block;transform: scale(1.16);transform-origin:center center;" />
               </div>
               <div>
                 <div class="brand-name">${escapeHtml(company.nombre || settings.title || "Rifas publicas")}</div>
@@ -5438,7 +5560,7 @@ function renderShell(site, slug) {
                 <div class="hero-company-line">${escapeHtml(settings.title || company.nombre || heroTitle || "Rifas publicas")}</div>
                 <div class="hero-brand">
                   <div class="hero-brand-mark">
-                    <img src="${escapeHtml(settings.logoUrl || company.logo || ASSETS.brand)}" alt="${escapeHtml(company.nombre || settings.title || "Logo")}" loading="lazy" decoding="async" />
+                    <img data-public-logo src="${escapeHtml(settings.logoUrl || company.logo || ASSETS.brand)}" alt="${escapeHtml(company.nombre || settings.title || "Logo")}" loading="lazy" decoding="async" />
                   </div>
                 </div>
                 ${slogan ? `<p class="hero-slogan">${escapeHtml(slogan)}</p>` : ""}
@@ -5451,7 +5573,7 @@ function renderShell(site, slug) {
               </div>
 
                 <div class="hero-media hero-media-with-footer">
-                ${heroVideo ? renderInlineVideo(heroVideo, heroTitle) : `<img src="${escapeHtml(heroSpotlightImage)}" alt="${escapeHtml(heroSpotlightTitle)}" loading="eager" fetchpriority="high" decoding="async" />`}
+                ${heroVideo ? renderInlineVideo(heroVideo, heroTitle) : `<img ${heroSpotlightMediaAttribute} src="${escapeHtml(heroSpotlightImage)}" alt="${escapeHtml(heroSpotlightTitle)}" loading="eager" fetchpriority="high" decoding="async" />`}
                 ${featuredRaffle ? `
                   <div class="overlay hero-media-footer">
                     <div class="overlay-top">
@@ -5560,7 +5682,7 @@ function renderShell(site, slug) {
           <div class="footer-card footer-card-premium">
             <div class="footer-brand">
               <div class="footer-brand-mark">
-                <img src="${escapeHtml(settings.logoUrl || company.logo || ASSETS.brand)}" alt="${escapeHtml(company.nombre || settings.title || "Logo")}" loading="lazy" decoding="async" />
+                <img data-public-logo src="${escapeHtml(settings.logoUrl || company.logo || ASSETS.brand)}" alt="${escapeHtml(company.nombre || settings.title || "Logo")}" loading="lazy" decoding="async" />
               </div>
               <div class="footer-brand-copy">
                 <strong>${escapeHtml(company.nombre || settings.title || "Rifas publicas")}</strong>
@@ -6584,6 +6706,7 @@ async function loadSite() {
     const site = await fetchPublicSitePayload(slug);
     renderShell(site, slug);
     void refreshFeaturedRaffleAdvance(site, slug);
+    scheduleDeferredPublicMedia(site, slug);
   } catch (error) {
     if (!cached?.site) {
       app.innerHTML = `
