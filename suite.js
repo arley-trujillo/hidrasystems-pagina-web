@@ -2,6 +2,14 @@ const corporateConfig = window.__HIDRA_SUITE_CONFIG__ || {};
 const corporateApp = document.getElementById("app");
 const apiBaseUrl = String(corporateConfig.apiBaseUrl || window.HIDRA_API_BASE_URL || "").replace(/\/+$/, "") || "https://hidrasystems-backend.onrender.com";
 const siteSlug = String(corporateConfig.slug || "hidra-suite").trim();
+const webChatState = {
+  open: false,
+  loading: false,
+  token: sessionStorage.getItem("hidra-suite-webchat-token") || "",
+  messages: [],
+  customer: null,
+  pollTimer: null,
+};
 
 const starterSections = [
   {
@@ -101,6 +109,65 @@ function renderFaq(items) {
   </div></section>`;
 }
 
+function webChatMarkup() {
+  const messages = asArray(webChatState.messages);
+  return `<div class="hs-chat" data-hs-chat>
+    <section class="hs-chat-panel" ${webChatState.open ? "" : "hidden"} aria-label="Chat con HIDRA SAS">
+      <header><div><strong>Bulma · HIDRA SAS</strong><span>Diagnóstico de operación</span></div><button type="button" data-hs-chat-close aria-label="Cerrar chat">×</button></header>
+      <div class="hs-chat-content">
+        ${webChatState.token ? `<div class="hs-chat-messages" data-hs-chat-messages>${messages.map((item) => `<div class="hs-chat-bubble ${item.direction === "in" ? "is-customer" : "is-agent"}">${escapeHtml(item.message || "")}</div>`).join("")}</div>
+          <form class="hs-chat-composer" data-hs-chat-composer><textarea name="message" rows="2" maxlength="1200" placeholder="Escribe tu mensaje..."></textarea><button type="submit" ${webChatState.loading ? "disabled" : ""}>Enviar</button></form>`
+        : `<div class="hs-chat-intro"><p>Cuéntanos cómo funciona hoy tu empresa. Bulma hará un diagnóstico inicial y un asesor continuará cuando sea necesario.</p><form data-hs-chat-start><label>Tu nombre<input name="name" required minlength="2" maxlength="90" placeholder="Nombre y apellido" /></label><label>Tu WhatsApp<input name="phone" required inputmode="tel" placeholder="Ej. 573001234567" /></label><button type="submit" ${webChatState.loading ? "disabled" : ""}>Iniciar diagnóstico</button></form></div>`}
+      </div>
+    </section>
+    <button class="hs-chat-launcher" type="button" data-hs-chat-toggle aria-expanded="${webChatState.open}"><span>◌</span> Hablemos</button>
+  </div>`;
+}
+
+function paintWebChat() {
+  const mount = corporateApp.querySelector("[data-hs-webchat]");
+  if (!mount) return;
+  mount.innerHTML = webChatMarkup();
+  const messages = mount.querySelector("[data-hs-chat-messages]");
+  if (messages) messages.scrollTop = messages.scrollHeight;
+}
+
+function stopWebChatPolling() {
+  window.clearInterval(webChatState.pollTimer);
+  webChatState.pollTimer = null;
+}
+
+async function loadWebChatMessages() {
+  if (!webChatState.token || !webChatState.open || webChatState.loading) return;
+  try {
+    const response = await fetch(`${apiBaseUrl}/public-site/${encodeURIComponent(siteSlug)}/chat/messages`, {
+      headers: { Authorization: `Bearer ${webChatState.token}` },
+      cache: "no-store",
+    });
+    if (response.status === 401) {
+      sessionStorage.removeItem("hidra-suite-webchat-token");
+      webChatState.token = "";
+      webChatState.messages = [];
+      paintWebChat();
+      return;
+    }
+    if (!response.ok) return;
+    const payload = await response.json();
+    webChatState.messages = asArray(payload.messages);
+    webChatState.customer = payload.customer || webChatState.customer;
+    paintWebChat();
+  } catch {
+    // Una falla temporal no debe cerrar ni perder la conversación del visitante.
+  }
+}
+
+function startWebChatPolling() {
+  stopWebChatPolling();
+  if (webChatState.token && webChatState.open) {
+    webChatState.pollTimer = window.setInterval(() => void loadWebChatMessages(), 5000);
+  }
+}
+
 function renderSite(site = {}) {
   const settings = site.settings || {};
   const company = site.company || {};
@@ -142,7 +209,9 @@ function renderSite(site = {}) {
         ${renderFaq(faq)}
       </main>
       <footer><div class="corporate-shell footer-inner"><div><strong>${escapeHtml(corporateName)}</strong><p>${escapeHtml(settings.slogan || `${suiteName}: tecnología que se adapta a tu negocio.`)}</p></div><a href="${escapeHtml(whatsappUrl)}" target="_blank" rel="noopener">WhatsApp comercial</a></div></footer>
+      <div data-hs-webchat></div>
     </div>`;
+  paintWebChat();
 }
 
 async function loadCorporateSite() {
@@ -158,3 +227,67 @@ async function loadCorporateSite() {
 }
 
 loadCorporateSite();
+
+corporateApp.addEventListener("click", (event) => {
+  if (event.target.closest("[data-hs-chat-toggle]")) {
+    webChatState.open = !webChatState.open;
+    paintWebChat();
+    if (webChatState.open) {
+      void loadWebChatMessages();
+      startWebChatPolling();
+    } else {
+      stopWebChatPolling();
+    }
+    return;
+  }
+  if (event.target.closest("[data-hs-chat-close]")) {
+    webChatState.open = false;
+    stopWebChatPolling();
+    paintWebChat();
+  }
+});
+
+corporateApp.addEventListener("submit", async (event) => {
+  const startForm = event.target.closest("[data-hs-chat-start]");
+  const composer = event.target.closest("[data-hs-chat-composer]");
+  if (!startForm && !composer) return;
+  event.preventDefault();
+  if (webChatState.loading) return;
+  webChatState.loading = true;
+  paintWebChat();
+  try {
+    if (startForm) {
+      const form = new FormData(startForm);
+      const response = await fetch(`${apiBaseUrl}/public-site/${encodeURIComponent(siteSlug)}/chat/session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: form.get("name"), phone: form.get("phone") }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload?.error || "No fue posible iniciar el chat.");
+      webChatState.token = payload.token || "";
+      webChatState.messages = asArray(payload.messages);
+      webChatState.customer = payload.customer || null;
+      sessionStorage.setItem("hidra-suite-webchat-token", webChatState.token);
+      startWebChatPolling();
+    } else {
+      const form = new FormData(composer);
+      const message = String(form.get("message") || "").trim();
+      if (!message) return;
+      const response = await fetch(`${apiBaseUrl}/public-site/${encodeURIComponent(siteSlug)}/chat/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${webChatState.token}` },
+        body: JSON.stringify({ message }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload?.error || "No fue posible enviar el mensaje.");
+      webChatState.messages = asArray(payload.messages);
+      webChatState.customer = payload.customer || webChatState.customer;
+    }
+  } catch (error) {
+    webChatState.messages = [...webChatState.messages, { direction: "out", message: error?.message || "No fue posible continuar el chat." }];
+  } finally {
+    webChatState.loading = false;
+    paintWebChat();
+  }
+});
