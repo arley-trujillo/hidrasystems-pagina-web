@@ -18,6 +18,17 @@
       };
     </script>
     <script defer src="/app.js?v=__ASSET_VERSION__"></script>
+    <script>
+      document.addEventListener('DOMContentLoaded', function () {
+        var match = window.location.pathname.match(/^\/(?:negocio|retail)\/([^/]+)/);
+        var apiBase = String(window.__PUBLIC_SITE_CONFIG__.apiBaseUrl || '').replace(/\/+$/, '');
+        if (!match || !apiBase || apiBase.indexOf('__') === 0) return;
+        var script = document.createElement('script');
+        script.src = apiBase + '/public-retail/' + encodeURIComponent(decodeURIComponent(match[1])) + '/repairs/widget.js';
+        script.async = true;
+        document.head.appendChild(script);
+      });
+    </script>
   </head>
   <body>
     <div id="app">
