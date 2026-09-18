@@ -15,6 +15,7 @@ const apiBaseUrl = (
   "https://luis-d038.onrender.com" ||
   ""
 ).replace(/\/+$/, "");
+const hidraSuiteSlug = String(process.env.HIDRA_SUITE_SLUG || "hidra-suite").trim();
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
@@ -82,6 +83,7 @@ async function serveHtml(res, templateName) {
   const assetVersion = await getAssetVersion();
   const html = template
     .replaceAll("__API_BASE_URL__", apiBaseUrl)
+    .replaceAll("__HIDRA_SUITE_SLUG__", hidraSuiteSlug)
     .replaceAll("__ASSET_VERSION__", assetVersion);
   res.writeHead(200, {
     "Content-Type": "text/html; charset=utf-8",
@@ -104,6 +106,13 @@ const server = http.createServer(async (req, res) => {
     const retailPath = pathname === "/negocio" || pathname.startsWith("/negocio/") || pathname.startsWith("/retail/");
     if (retailPath) {
       await serveHtml(res, "retail.html");
+      return;
+    }
+
+    // El dominio principal siempre es la vitrina comercial de HIDRA SUITE.
+    // Conservamos ?slug=... para los enlaces antiguos de rifas.
+    if (pathname === "/" && !url.searchParams.get("slug")) {
+      await serveHtml(res, "corporate.html");
       return;
     }
 
