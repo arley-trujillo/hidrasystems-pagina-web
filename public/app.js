@@ -1104,13 +1104,15 @@ function renderRaffleResultsModalContent() {
               <article class="raffle-result-prize-card">
                 <span class="raffle-result-prize-label">Premio</span>
                 <strong>${escapeHtml(prize?.prizeName || "Premio menor")}</strong>
+                ${prize?.prizeValue != null ? `<div class="raffle-result-data"><span>Valor del premio</span><strong>$${escapeHtml(Number(prize.prizeValue).toLocaleString('es-CO'))}</strong></div>` : ''}
+                ${prize?.resultState ? `<div class="raffle-result-data"><span>Resultado</span><strong>${escapeHtml(prize.resultState)}</strong></div>` : ''}
                 <div class="raffle-result-data">
                   <span>Número ganador</span>
                   <strong>${escapeHtml(prize?.winningNumber || "Pendiente de publicación")}</strong>
                 </div>
                 <div class="raffle-result-data">
                   <span>Ganador</span>
-                  <strong class="raffle-result-winner">${escapeHtml(maskPublicWinnerName(prize?.winnerName) || "Por confirmar")}</strong>
+                  <strong class="raffle-result-winner">${escapeHtml(prize?.sold === false ? 'Sin ganador: boleta no vendida' : prize?.eligible === false ? 'No habilitado para este premio' : maskPublicWinnerName(prize?.winnerName) || (prize?.resultState ? 'Nombre no publicado' : 'Por confirmar'))}</strong>
                 </div>
               </article>
             `;
