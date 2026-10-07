@@ -29,13 +29,18 @@ Luego abre:
 - o `http://localhost:3000/?slug=agropecuario`
 - retail: `http://localhost:3000/negocio/mi-tienda`
 
-## Produccion
+## Produccion: Render Static Site
 
-En Render:
+Este repositorio es un **Static Site**; el backend se publica por separado como Web Service.
 
-- crea un web service para este proyecto
-- define `API_BASE_URL` apuntando al backend
-- usa `npm start`
+En Render usa el archivo `render.yaml` o configura:
+
+- Build command: `npm run build`
+- Publish directory: `public`
+- Regla SPA: `/*` → `/index.html` (rewrite)
+
+Así funcionan rutas públicas sin barra final, por ejemplo
+`https://hidrago.onrender.com/elagropecuario`.
 
 ## Estado actual
 

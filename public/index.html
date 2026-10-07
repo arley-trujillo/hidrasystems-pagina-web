@@ -5,19 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0f172a" />
     <title>Rifas Public Site</title>
-    <link rel="preconnect" href="__API_BASE_URL__" crossorigin />
+    <link rel="preconnect" href="https://hidrasystems-backend.onrender.com" crossorigin />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;700;800;900&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=__ASSET_VERSION__" />
+    <link rel="stylesheet" href="/styles.css?v=20261007" />
     <!-- Meta Pixel pausado temporalmente. -->
+    <script src="/config.js?v=20261007"></script>
     <script>
       window.__PUBLIC_SITE_CONFIG__ = {
-        apiBaseUrl: "__API_BASE_URL__",
+        apiBaseUrl: String(window.HIDRA_API_BASE_URL || "https://hidrasystems-backend.onrender.com").trim(),
         mode: "raffles"
       };
     </script>
-    <script defer src="/app.js?v=__ASSET_VERSION__"></script>
+    <script defer src="/app.js?v=20261007"></script>
     <script>
       document.addEventListener('DOMContentLoaded', function () {
         var match = window.location.pathname.match(/^\/(?:negocio|retail)\/([^/]+)/);

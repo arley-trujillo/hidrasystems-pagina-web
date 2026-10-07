@@ -1,0 +1,12 @@
+services:
+  - type: web
+    runtime: static
+    name: hidrago
+    buildCommand: npm run build
+    staticPublishPath: ./public
+    routes:
+      # Public company pages are resolved in the browser from their slug.
+      # Render must return this SPA entry point for /elagropecuario (no slash).
+      - type: rewrite
+        source: /*
+        destination: /index.html

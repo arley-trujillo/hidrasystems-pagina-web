@@ -9,7 +9,7 @@ function resolvePublicApiBaseUrl() {
     return "http://localhost:10000";
   }
 
-  return "https://luis-d038.onrender.com";
+  return "https://hidrasystems-backend.onrender.com";
 }
 
 const API_BASE_URL = resolvePublicApiBaseUrl();
