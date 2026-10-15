@@ -249,6 +249,8 @@ const paymentModalState = {
   file: null,
   fileName: "",
   checkoutUrl: "",
+  preparingPackage: false,
+  packagePreparation: null,
   loading: false,
   error: "",
   notice: "",
@@ -539,13 +541,15 @@ function renderQuickPackageActions(raffle = {}) {
   return `
     <div class="quick-package-actions" aria-label="Compra rápida por paquetes">
       <strong class="quick-package-label">Elige tu paquete</strong>
-      <p class="quick-package-description">Números al azar. Elige la cantidad y continúa al pago.</p>
+      <p class="quick-package-description">Números al azar y pago directo. Elige tu paquete.</p>
       <div class="quick-package-list">
         ${packages.map((item) => `
           <button type="button" class="quick-package-button" data-raffle-package="${escapeAttr(String(item.quantity))}" data-raffle-id="${raffleId}">
-            <strong>${escapeHtml(`${item.quantity} boleta${item.quantity === 1 ? "" : "s"}`)}</strong>
-            <span>${escapeHtml(currencyFormatter.format(item.value))}</span>
-            <small>Elegir y pagar →</small>
+            <span class="quick-package-copy">
+              <span class="quick-package-kicker">Comprar paquete</span>
+              <strong class="quick-package-offer">de ${escapeHtml(String(item.quantity))} <span class="quick-package-times">×</span> <span class="quick-package-price">${escapeHtml(currencyFormatter.format(item.value))}</span></strong>
+            </span>
+            <span class="quick-package-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
           </button>
         `).join("")}
       </div>
@@ -2809,6 +2813,11 @@ async function openQuickPackagePayment(raffleId, quantity, retry = false) {
     paintPaymentModal();
   }
   const requestId = paymentModalState.requestId;
+  paymentModalState.packagePreparation = prepareQuickPackageNumbers(raffle, pack, slug, raffleId, requestId);
+  return paymentModalState.packagePreparation;
+}
+
+async function prepareQuickPackageNumbers(raffle, pack, slug, raffleId, requestId) {
   const key = `${slug}:${raffleId}`;
   try {
     const payload = await loadQuickPackageAvailability(slug, raffleId);
@@ -2850,7 +2859,12 @@ async function openQuickPackagePayment(raffleId, quantity, retry = false) {
   }
   if (!paymentModalState.open || paymentModalState.requestId !== requestId) return;
   paymentModalState.preparingPackage = false;
-  paymentModalState.loading = false;
+  if (!paymentModalState.error) {
+    const instructions = document.querySelector("#payment-modal-content [data-payment-instructions]");
+    if (instructions) instructions.innerHTML = renderPaymentInstructionsPanel(getPaymentInstructionsText(paymentModalState.raffle, paymentModalState.site));
+    refreshPaymentModalActionState();
+    return true;
+  }
   const focusedField = document.activeElement?.dataset?.paymentField;
   const caret = document.activeElement?.selectionStart;
   paintPaymentModal();
@@ -2859,6 +2873,23 @@ async function openQuickPackagePayment(raffleId, quantity, retry = false) {
     field?.focus();
     if (Number.isInteger(caret)) field?.setSelectionRange?.(caret, caret);
   }
+  return false;
+}
+
+async function awaitPackageBeforePayment() {
+  if (paymentModalState.loading) return false;
+  if (!paymentModalState.preparingPackage) return true;
+  const requestId = paymentModalState.requestId;
+  const preparation = paymentModalState.packagePreparation;
+  paymentModalState.loading = true;
+  submitPublicPaymentStateNotice("Verificando disponibilidad para confirmar tu compra…", "info");
+  const ready = await Promise.resolve(preparation).catch(() => false);
+  if (!paymentModalState.open || paymentModalState.requestId !== requestId) return false;
+  paymentModalState.loading = false;
+  const canSubmit = Boolean(ready && paymentModalState.selected.length && !paymentModalState.error);
+  if (canSubmit) refreshPaymentModalActionState();
+  else paintPaymentModal();
+  return canSubmit;
 }
 
 function openPaymentModal(payload = {}) {
@@ -2885,9 +2916,10 @@ function openPaymentModal(payload = {}) {
   paymentModalState.fileName = "";
   paymentModalState.checkoutUrl = "";
   paymentModalState.preparingPackage = Boolean(payload.preparingPackage);
-  paymentModalState.loading = paymentModalState.preparingPackage;
+  paymentModalState.packagePreparation = null;
+  paymentModalState.loading = false;
   paymentModalState.error = "";
-  paymentModalState.notice = paymentModalState.preparingPackage ? "Asignando tus números al azar. Puedes completar tus datos." : "";
+  paymentModalState.notice = "";
   paymentModalState.noticeTone = "info";
   paymentModalState.requestId += 1;
   syncPaymentModal();
@@ -2895,6 +2927,7 @@ function openPaymentModal(payload = {}) {
 }
 
 function closePaymentModal() {
+  paymentModalState.packagePreparation = null;
   paymentModalState.preparingPackage = false;
   paymentModalState.open = false;
   paymentModalState.site = null;
@@ -3073,13 +3106,13 @@ function refreshPaymentModalActionState() {
     && String(paymentModalState.customerName || "").trim()
     && String(paymentModalState.customerCity || "").trim()
     && String(paymentModalState.customerPhone || "").trim()
-    && selectionSummary.isComplete
-    && (!supportUploadMode || selectionSummary.completeTickets === 1)
+    && (selectionSummary.isComplete || (paymentModalState.preparingPackage && paymentModalState.raffle?.quickPackage))
+    && (!supportUploadMode || (paymentModalState.preparingPackage ? paymentModalState.raffle?.quickPackage?.quantity === 1 : selectionSummary.completeTickets === 1))
   );
 
   modal.querySelectorAll('[data-action="start-public-pse"], [data-action="trigger-public-receipt-upload"]').forEach((button) => {
     if (button instanceof HTMLButtonElement) {
-      button.disabled = !ready;
+      button.disabled = !ready || (button.dataset.action === "start-public-pse" && paymentModalState.preparingPackage);
     }
   });
 }
@@ -3099,7 +3132,7 @@ function renderPaymentModalContent() {
     : "Contin·a con tu pago con el método que prefieras.";
   const total = Number(paymentModalState.amount || getPaymentModalSelectionTotal(raffle, selected) || 0);
   const pricingSummary = raffle ? formatRafflePricingSummary(raffle) : "";
-  const selectedChips = selected.length
+  const selectedChips = raffle?.quickPackage ? "" : selected.length
     ? selected
       .map((item) => `<span class="payment-chip">${escapeHtml(item)}</span>`)
       .join("")
@@ -3114,12 +3147,12 @@ function renderPaymentModalContent() {
   const customerName = String(paymentModalState.customerName || "").trim();
   const customerCity = String(paymentModalState.customerCity || "").trim();
   const customerPhone = String(paymentModalState.customerPhone || "").trim();
-  const isContactReady = Boolean(selectionSummary.isComplete && customerName && customerCity && customerPhone);
+  const isContactReady = Boolean((selectionSummary.isComplete || (paymentModalState.preparingPackage && raffle?.quickPackage)) && customerName && customerCity && customerPhone);
   const supportUploadMode = Boolean(raffle?.campaign?.ticket_auto_config?.public_support_upload);
-  const isFidelitySingleTicketValid = !supportUploadMode || selectionSummary.completeTickets === 1;
+  const isFidelitySingleTicketValid = !supportUploadMode || (paymentModalState.preparingPackage ? raffle?.quickPackage?.quantity === 1 : selectionSummary.completeTickets === 1);
   const isDisabled = !isContactReady || paymentModalState.loading || !isFidelitySingleTicketValid;
   const supportLabel = getRaffleDisplayWhatsApp(site) ? `Soporte por WhatsApp: ${getRaffleDisplayWhatsApp(site)}` : "Soporte por WhatsApp";
-  const paymentProgressMarkup = selected.length ? `
+  const paymentProgressMarkup = !raffle?.quickPackage && selected.length ? `
     <div class="payment-progress">
       <div class="payment-progress-row">
         <span class="payment-progress-chip is-active">${selectionSummary.totalNumbers} numero${selectionSummary.totalNumbers === 1 ? "" : "s"}</span>
@@ -3142,7 +3175,7 @@ function renderPaymentModalContent() {
     </div>
 
     ${notice}
-    ${raffle?.quickPackage && !paymentModalState.loading && !selected.length ? `
+    ${raffle?.quickPackage && !paymentModalState.preparingPackage && !paymentModalState.loading && !selected.length ? `
       <button type="button" class="button secondary" data-action="retry-quick-package">Reintentar selección automática</button>
     ` : ""}
 
@@ -3152,10 +3185,10 @@ function renderPaymentModalContent() {
           ${paymentProgressMarkup}
           <span class="payment-modal-kicker">Sorteo seleccionado</span>
           <h4>${escapeHtml(title)}</h4>
-          <p class="payment-modal-copy">${escapeHtml(selected.length ? (selectionSummary.isComplete ? `Llevas ${selectionSummary.completeTickets} boleta${selectionSummary.completeTickets === 1 ? "" : "s"} completa${selectionSummary.completeTickets === 1 ? "" : "s"}.` : `Llevas ${selected.length} números y te faltan ${selectionSummary.missingForNext} para completar la siguiente boleta.`) : emptySelectionCopy)}</p>
-          <div class="payment-modal-chips">
+          <p class="payment-modal-copy">${escapeHtml(raffle?.quickPackage ? `Paquete de ${raffle.quickPackage.quantity}. Tus números se asignan automáticamente.` : selected.length ? (selectionSummary.isComplete ? `Llevas ${selectionSummary.completeTickets} boleta${selectionSummary.completeTickets === 1 ? "" : "s"} completa${selectionSummary.completeTickets === 1 ? "" : "s"}.` : `Llevas ${selected.length} números y te faltan ${selectionSummary.missingForNext} para completar la siguiente boleta.`) : emptySelectionCopy)}</p>
+          ${!raffle?.quickPackage ? `<div class="payment-modal-chips">
             ${selectedChips}
-          </div>
+          </div>` : ""}
           <div class="payment-modal-total">
             <span>Total a pagar</span>
             <strong>${escapeHtml(formatCOP(total))}</strong>
@@ -3185,7 +3218,7 @@ function renderPaymentModalContent() {
               <strong>Así debes realizar tu pago</strong>
               <p>Esta información viene directamente de la configuraci·n del sorteo.</p>
             </div>
-            ${renderPaymentInstructionsPanel(paymentInstructions)}
+            <div data-payment-instructions>${renderPaymentInstructionsPanel(paymentInstructions)}</div>
           </div>
       </div>
 
@@ -3830,6 +3863,7 @@ function ensurePaymentModalContactReady() {
 }
 
 async function submitPublicPseCheckout() {
+  if (!await awaitPackageBeforePayment()) return;
   const site = paymentModalState.site || window.__PUBLIC_SITE_STATE__?.site || null;
   const slug = paymentModalState.slug || window.__PUBLIC_SITE_STATE__?.slug || "";
   const raffle = paymentModalState.raffle || null;
@@ -3907,6 +3941,8 @@ async function submitPublicPseCheckout() {
 }
 
 async function submitPublicReceiptUpload(file = null) {
+  if (!file || !ensurePaymentModalContactReady()) return;
+  if (!await awaitPackageBeforePayment()) return;
   const site = paymentModalState.site || window.__PUBLIC_SITE_STATE__?.site || null;
   const slug = paymentModalState.slug || window.__PUBLIC_SITE_STATE__?.slug || "";
   const raffle = paymentModalState.raffle || null;
@@ -5787,21 +5823,19 @@ function renderShell(site, slug) {
                           </div>
                         ` : ""}
                       </div>
-                      <div class="overlay-actions">
-                        <button
-                          type="button"
-                          class="button gold js-open-raffle-selector hero-buy-button"
-                          data-raffle-id="${escapeHtml(String(featuredRaffle?.campaign?.id || ""))}"
-                        >
-                          Comprar
-                        </button>
-                      </div>
                     </div>
                     ${renderRaffleAdvanceBlock(featuredRaffle)}
                   </div>
                 ` : ""}
               </div>
               <div class="hero-actions">
+                ${featuredRaffle ? `
+                  <button
+                    type="button"
+                    class="button gold js-open-raffle-selector hero-buy-button"
+                    data-raffle-id="${escapeHtml(String(featuredRaffle?.campaign?.id || ""))}"
+                  >Comprar</button>
+                ` : ""}
                 ${heroButton ? `<a class="button gold" href="${escapeHtml(heroButton)}"${String(heroButton).startsWith("#") ? "" : ' target="_blank" rel="noreferrer"'}>${escapeHtml(heroLabel)}</a>` : ""}
                 ${settings.showResults !== false ? '<button type="button" class="button secondary hero-secondary" data-action="open-raffle-results">Resultados</button>' : ""}
               </div>
