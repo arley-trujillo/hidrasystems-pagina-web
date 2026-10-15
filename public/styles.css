@@ -3734,6 +3734,66 @@ button {
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
+.footer-contact-clean {
+  align-content: start;
+  gap: 14px;
+}
+
+.footer-contact-clean > .footer-label {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.footer-contact-clean .footer-social-grid {
+  gap: 8px;
+}
+
+.footer-contact-clean .social-link {
+  min-height: 44px;
+  padding: 8px 12px;
+  gap: 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: none;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.footer-contact-clean .social-link:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.footer-contact-clean .social-link:focus-visible {
+  outline: 2px solid #ffd66b;
+  outline-offset: 3px;
+}
+
+.footer-contact-clean .social-link-icon {
+  width: 24px;
+  height: 24px;
+  flex-basis: 24px;
+}
+
+.footer-visit-summary {
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.footer-visit-summary strong {
+  color: #fff;
+  font-weight: 600;
+}
+
 .footer-visit-pill {
   display: inline-flex;
   align-items: center;

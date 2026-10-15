@@ -2034,10 +2034,6 @@ function renderRaffles(site) {
                 Escoger mis números
               </button>
             </div>
-            <div class="raffle-feature-meta">
-              <span>${escapeHtml(mode)}</span>
-              ${total ? `<span>${escapeHtml(String(total))} boletas</span>` : ""}
-            </div>
           </div>
         </article>
       `;
@@ -5870,7 +5866,7 @@ function renderShell(site, slug) {
                 ${footerQuickLinks.map(([label, href]) => `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>`).join("")}
               </div>
             </div>
-            <div class="footer-contact">
+            <div class="footer-contact footer-contact-clean">
               <span class="footer-label">Redes sociales</span>
               ${footerSocialLinks.length ? `
                 <div class="footer-social-grid">
@@ -5882,8 +5878,7 @@ function renderShell(site, slug) {
                   `).join("")}
                 </div>
               ` : ""}
-              ${settings.whatsappNumber ? `<a class="footer-contact-pill" href="${escapeHtml(whatsappLink(settings.whatsappNumber))}" target="_blank" rel="noreferrer">WhatsApp ${escapeHtml(settings.whatsappNumber)}</a>` : ""}
-              ${visitCount > 0 ? `<div class="footer-visit-counter"><span class="footer-label">Visitas de la pagina</span><div class="footer-visit-pill">${numberFormatter.format(visitCount)} visitas</div></div>` : `<div class="footer-visit-counter"><span class="footer-label">Visitas de la pagina</span><div class="footer-visit-pill">0 visitas</div></div>`}
+              <p class="footer-visit-summary"><strong>${numberFormatter.format(Math.max(0, visitCount))}</strong> visitas a la página</p>
               </div>
             </div>
           </div>
