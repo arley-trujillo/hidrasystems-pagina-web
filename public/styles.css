@@ -999,15 +999,15 @@ button {
 .quick-package-actions {
   width: 100%;
   box-sizing: border-box;
-  padding: 16px;
-  gap: 10px;
+  padding: 12px;
+  gap: 8px;
   border: 1px solid #e8c66a;
   border-radius: 18px;
   background: #fffbeb;
 }
 .quick-package-actions .quick-package-label {
   color: #0b2340;
-  font-size: 21px;
+  font-size: 18px;
   letter-spacing: 0;
   text-transform: none;
 }
@@ -1015,16 +1015,22 @@ button {
 .quick-package-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .quick-package-list .quick-package-button {
   min-width: 0;
-  min-height: 104px;
-  padding: 14px 10px;
-  gap: 5px;
-  text-align: center;
+  min-height: 62px;
+  padding: 9px 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 3px 6px;
+  text-align: left;
   border: 2px solid #e2b43b;
   background: #fff;
 }
-.quick-package-button strong { font-size: 16px; }
-.quick-package-button span { font-size: 21px; color: #0b2340; }
-.quick-package-button small { color: #735000; font-size: 12px; font-weight: 700; }
+.quick-package-button strong { font-size: 12px; }
+.quick-package-button span { font-size: 16px; color: #0b2340; text-align: right; }
+.quick-package-button small { grid-column: 1 / -1; color: #735000; font-size: 11px; font-weight: 700; text-align: right; }
+.quick-package-button span { overflow-wrap: anywhere; min-width: 0; }
+@media (max-width: 480px) {
+  .quick-package-list { grid-template-columns: minmax(0, 1fr); }
+}
 .quick-package-button:focus-visible { outline: 3px solid #0b2340; outline-offset: 3px; }
 .raffle-feature-body.raffle-feature-body-packages {
   grid-template-columns: minmax(0, 1fr);

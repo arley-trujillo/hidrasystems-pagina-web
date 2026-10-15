@@ -16,6 +16,7 @@ const API_BASE_URL = resolvePublicApiBaseUrl();
 const app = document.getElementById("app");
 const PUBLIC_SITE_FETCH_ATTEMPTS = 3;
 const PUBLIC_SITE_RETRY_DELAYS_MS = [0, 700, 1500];
+const publicQuickAvailability = new Map();
 
 function waitForPublicSiteRetry(delayMs) {
   return delayMs > 0
@@ -37,7 +38,7 @@ async function fetchPublicSitePayload(slug) {
       // La portada es parte esencial de la tarjeta principal. Cargarla desde la
       // primera respuesta evita mostrar una imagen de plantilla y reemplazarla
       // segundos después por la portada real del sorteo.
-      const query = new URLSearchParams();
+      const query = new URLSearchParams({ fast: "1" });
       if (attempt > 0) {
         query.set("retry", String(attempt));
       }
@@ -491,21 +492,31 @@ function getRafflePricingPackages(raffle = {}) {
     .sort((a, b) => a.quantity - b.quantity);
 }
 
+function getQuickPackageOptions(raffle = {}) {
+  const config = raffle?.publicConfig || raffle?.public_config || {};
+  const custom = config.quickPackages ?? config.quick_packages;
+  if (Array.isArray(custom)) {
+    return custom.map(item => ({
+      quantity: Number(item.quantity ?? item.cantidad),
+      value: Number(item.price ?? item.valor),
+    })).filter(item => Number.isInteger(item.quantity) && item.quantity > 0 && Number.isFinite(item.value) && item.value > 0);
+  }
+  return getRafflePricingStrategy(raffle) === "paquetes" ? getRafflePricingPackages(raffle) : [];
+}
+
 function shouldShowQuickPackages(raffle = {}) {
   const config = raffle?.publicConfig || raffle?.public_config || {};
   return (config.showQuickPackages ?? config.show_quick_packages) === true
-    && getRafflePricingStrategy(raffle) === "paquetes"
-    && getRafflePricingPackages(raffle).some((item) => item.quantity > 0 && item.value > 0);
+    && getQuickPackageOptions(raffle).length > 0;
 }
 
 function renderQuickPackageActions(raffle = {}) {
   if (!shouldShowQuickPackages(raffle)) return "";
   const groupSize = getRaffleSelectorCombinationSize(raffle);
   const supportUploadMode = Boolean(getRaffleSelectorAutoConfig(raffle).public_support_upload);
-  const packages = getRafflePricingPackages(raffle)
+  const packages = getQuickPackageOptions(raffle)
     .filter((item) => item.quantity * groupSize <= RAFFLE_SELECTOR_LIMIT)
-    .filter((item) => !supportUploadMode || item.quantity === 1)
-    .slice(0, 4);
+    .filter((item) => !supportUploadMode || item.quantity === 1);
   if (!packages.length) return "";
 
   const raffleId = escapeAttr(String(raffle?.campaign?.id || ""));
@@ -527,6 +538,9 @@ function renderQuickPackageActions(raffle = {}) {
 }
 
 function getRafflePriceForQuantity(raffle = {}, quantity = 1) {
+  if (raffle.quickPackage && Number(quantity) === raffle.quickPackage.quantity) {
+    return raffle.quickPackage.value;
+  }
   const packages = getRafflePricingPackages(raffle);
   const count = Math.max(1, Number.parseInt(quantity, 10) || 1);
 
@@ -567,6 +581,9 @@ function getRafflePriceForQuantity(raffle = {}, quantity = 1) {
 }
 
 function formatRafflePricingSummary(raffle = {}) {
+  if (raffle.quickPackage) {
+    return `${raffle.quickPackage.quantity} boletas por ${currencyFormatter.format(raffle.quickPackage.value)}`;
+  }
   const packages = getRafflePricingPackages(raffle);
   if (!packages.length) {
     const price = getRaffleDisplayPrice(raffle);
@@ -2722,12 +2739,114 @@ function getPaymentModalSelectionTotal(raffle = {}, selected = []) {
   return summary.total;
 }
 
+function loadQuickPackageAvailability(slug, raffleId) {
+  const key = `${slug}:${raffleId}`;
+  const existing = publicQuickAvailability.get(key);
+  if (existing && existing.expiresAt > Date.now()) return existing.promise;
+  const entry = { expiresAt: Date.now() + 15000 };
+  entry.promise = (async () => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15000);
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/public-site/${encodeURIComponent(slug)}/raffles/${encodeURIComponent(raffleId)}/availability?limit=${RAFFLE_SELECTOR_LIMIT}&quick=1`,
+        { cache: "no-store", signal: controller.signal },
+      );
+      if (!response.ok) throw new Error("No fue posible consultar los números disponibles. Intenta de nuevo.");
+      const payload = await response.json();
+      entry.expiresAt = Date.now() + 10000;
+      return payload;
+    } catch (error) {
+      if (publicQuickAvailability.get(key) === entry) publicQuickAvailability.delete(key);
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  })();
+  publicQuickAvailability.set(key, entry);
+  return entry.promise;
+}
+
+function prefetchQuickPackages(site, slug) {
+  asArray(site?.activeRaffles).filter(shouldShowQuickPackages).slice(0, 2).forEach(raffle => {
+    void loadQuickPackageAvailability(slug, raffle.campaign.id).catch(() => {});
+  });
+}
+
+async function openQuickPackagePayment(raffleId, quantity, retry = false) {
+  const site = window.__PUBLIC_SITE_STATE__?.site;
+  const slug = window.__PUBLIC_SITE_STATE__?.slug;
+  const raffle = asArray(site?.activeRaffles).find(item => String(item.campaign?.id) === String(raffleId));
+  const pack = raffle && getQuickPackageOptions(raffle).find(item => item.quantity === Number(quantity));
+  if (!slug || !raffle || !pack || !shouldShowQuickPackages(raffle)) return;
+  const contact = retry ? getPaymentModalContactPayload() : {};
+  if (raffleSelectorState.open) closeRaffleSelector();
+  openPaymentModal({ site, slug, raffle: { ...raffle, quickPackage: pack }, selected: [], preparingPackage: true });
+  if (retry) {
+    paymentModalState.customerName = contact.customer_name || "";
+    paymentModalState.customerCity = contact.customer_city || "";
+    paymentModalState.customerPhone = contact.customer_phone || "";
+    paintPaymentModal();
+  }
+  const requestId = paymentModalState.requestId;
+  const key = `${slug}:${raffleId}`;
+  try {
+    const payload = await loadQuickPackageAvailability(slug, raffleId);
+    if (!paymentModalState.open || paymentModalState.requestId !== requestId) return;
+    publicQuickAvailability.delete(key);
+    const current = payload?.raffle || {};
+    const updatedRaffle = {
+      ...raffle, quickPackage: pack,
+      campaign: {
+        ...raffle.campaign,
+        ticketAutoConfig: current.ticketAutoConfig || getRaffleSelectorAutoConfig(raffle),
+        ticket_auto_config: current.ticketAutoConfig || getRaffleSelectorAutoConfig(raffle),
+        paymentInstructions: current.paymentInstructions || current.payment_instructions || raffle.campaign.paymentInstructions || "",
+        payment_instructions: current.paymentInstructions || current.payment_instructions || raffle.campaign.paymentInstructions || "",
+      },
+    };
+    const required = pack.quantity * getRaffleSelectorCombinationSize(updatedRaffle);
+    const available = [...new Set(asArray(payload?.numbers).map(formatTicketSelectionLabel).filter(Boolean))];
+    if (required > RAFFLE_SELECTOR_LIMIT || available.length < required
+        || (getRaffleSelectorAutoConfig(updatedRaffle).public_support_upload && pack.quantity !== 1)) {
+      throw new Error("No hay suficientes números disponibles para este paquete. Elige otro paquete o intenta de nuevo.");
+    }
+    for (let index = available.length - 1; index > 0; index -= 1) {
+      const randomIndex = Math.floor(Math.random() * (index + 1));
+      [available[index], available[randomIndex]] = [available[randomIndex], available[index]];
+    }
+    paymentModalState.raffle = updatedRaffle;
+    paymentModalState.selected = available.slice(0, required);
+    paymentModalState.amount = getPaymentModalSelectionTotal(updatedRaffle, paymentModalState.selected);
+    paymentModalState.notice = "";
+    paymentModalState.error = "";
+  } catch (error) {
+    if (!paymentModalState.open || paymentModalState.requestId !== requestId) return;
+    paymentModalState.error = error?.name === "AbortError"
+      ? "La consulta está tardando. Intenta de nuevo."
+      : error?.message || "No fue posible preparar el paquete.";
+    paymentModalState.notice = paymentModalState.error;
+    paymentModalState.noticeTone = "error";
+  }
+  if (!paymentModalState.open || paymentModalState.requestId !== requestId) return;
+  paymentModalState.preparingPackage = false;
+  paymentModalState.loading = false;
+  const focusedField = document.activeElement?.dataset?.paymentField;
+  const caret = document.activeElement?.selectionStart;
+  paintPaymentModal();
+  if (focusedField) {
+    const field = document.querySelector(`[data-payment-field="${focusedField}"]`);
+    field?.focus();
+    if (Number.isInteger(caret)) field?.setSelectionRange?.(caret, caret);
+  }
+}
+
 function openPaymentModal(payload = {}) {
   const raffle = payload.raffle || null;
   const selected = asArray(payload.selected)
     .map((item) => String(item || "").trim())
     .filter(Boolean);
-  const resolvedSelected = selected.length > 0
+  const resolvedSelected = payload.preparingPackage ? [] : selected.length > 0
     ? selected
     : raffle
       ? getCurrentRaffleSelection(raffle.campaign.id)
@@ -2738,16 +2857,17 @@ function openPaymentModal(payload = {}) {
   paymentModalState.slug = String(payload.slug || "").trim();
   paymentModalState.raffle = raffle;
   paymentModalState.selected = [...new Set(resolvedSelected)];
-  paymentModalState.amount = getPaymentModalSelectionTotal(raffle, paymentModalState.selected);
+  paymentModalState.amount = payload.preparingPackage ? Number(raffle?.quickPackage?.value || 0) : getPaymentModalSelectionTotal(raffle, paymentModalState.selected);
   paymentModalState.customerName = "";
   paymentModalState.customerCity = "";
   paymentModalState.customerPhone = "";
   paymentModalState.file = null;
   paymentModalState.fileName = "";
   paymentModalState.checkoutUrl = "";
-  paymentModalState.loading = false;
+  paymentModalState.preparingPackage = Boolean(payload.preparingPackage);
+  paymentModalState.loading = paymentModalState.preparingPackage;
   paymentModalState.error = "";
-  paymentModalState.notice = "";
+  paymentModalState.notice = paymentModalState.preparingPackage ? "Asignando tus números al azar. Puedes completar tus datos." : "";
   paymentModalState.noticeTone = "info";
   paymentModalState.requestId += 1;
   syncPaymentModal();
@@ -2755,6 +2875,7 @@ function openPaymentModal(payload = {}) {
 }
 
 function closePaymentModal() {
+  paymentModalState.preparingPackage = false;
   paymentModalState.open = false;
   paymentModalState.site = null;
   paymentModalState.slug = "";
@@ -2947,6 +3068,9 @@ function renderPaymentModalContent() {
   const raffle = paymentModalState.raffle || null;
   const site = paymentModalState.site || {};
   const selected = asArray(paymentModalState.selected);
+  const emptySelectionCopy = raffle?.quickPackage
+    ? `Paquete de ${raffle.quickPackage.quantity} boletas con números al azar.`
+    : "Selecciona numeros antes de pagar.";
   const selectionSummary = getRaffleSelectorSelectionSummary(raffle, selected);
   const paymentInstructions = getPaymentInstructionsText(raffle, site);
   const title = raffle ? getRaffleDisplayTitle(raffle) : "Pago";
@@ -2959,7 +3083,7 @@ function renderPaymentModalContent() {
     ? selected
       .map((item) => `<span class="payment-chip">${escapeHtml(item)}</span>`)
       .join("")
-    : `<div class="selector-empty selector-empty-inline">Aun no hay numeros seleccionados.</div>`;
+    : `<div class="selector-empty selector-empty-inline">${paymentModalState.preparingPackage ? "Asignando números disponibles…" : "Aún no hay números seleccionados."}</div>`;
   const receiptLabel = paymentModalState.fileName
     ? `<div class="payment-file-name">${escapeHtml(paymentModalState.fileName)}</div>`
     : "";
@@ -2998,6 +3122,9 @@ function renderPaymentModalContent() {
     </div>
 
     ${notice}
+    ${raffle?.quickPackage && !paymentModalState.loading && !selected.length ? `
+      <button type="button" class="button secondary" data-action="retry-quick-package">Reintentar selección automática</button>
+    ` : ""}
 
     <div class="payment-modal-grid">
       <div class="payment-modal-left">
@@ -3005,7 +3132,7 @@ function renderPaymentModalContent() {
           ${paymentProgressMarkup}
           <span class="payment-modal-kicker">Sorteo seleccionado</span>
           <h4>${escapeHtml(title)}</h4>
-          <p class="payment-modal-copy">${escapeHtml(selected.length ? (selectionSummary.isComplete ? `Llevas ${selectionSummary.completeTickets} boleta${selectionSummary.completeTickets === 1 ? "" : "s"} completa${selectionSummary.completeTickets === 1 ? "" : "s"}.` : `Llevas ${selected.length} números y te faltan ${selectionSummary.missingForNext} para completar la siguiente boleta.`) : "Selecciona numeros antes de pagar.")}</p>
+          <p class="payment-modal-copy">${escapeHtml(selected.length ? (selectionSummary.isComplete ? `Llevas ${selectionSummary.completeTickets} boleta${selectionSummary.completeTickets === 1 ? "" : "s"} completa${selectionSummary.completeTickets === 1 ? "" : "s"}.` : `Llevas ${selected.length} números y te faltan ${selectionSummary.missingForNext} para completar la siguiente boleta.`) : emptySelectionCopy)}</p>
           <div class="payment-modal-chips">
             ${selectedChips}
           </div>
@@ -3292,8 +3419,9 @@ function applyQuickPackageSelection(availableNumbers = []) {
   if (!quantity || !raffle) return false;
 
   raffleSelectorState.quickPackageQuantity = 0;
+  const pack = getQuickPackageOptions(raffle).find(item => item.quantity === quantity);
   if (!shouldShowQuickPackages(raffle)
-      || !getRafflePricingPackages(raffle).some((item) => item.quantity === quantity)
+      || !pack
       || (getRaffleSelectorAutoConfig(raffle).public_support_upload && quantity !== 1)) {
     raffleSelectorState.notice = "Este paquete no está disponible. Elige otra opción de compra.";
     raffleSelectorState.noticeTone = "warning";
@@ -3320,10 +3448,10 @@ function applyQuickPackageSelection(availableNumbers = []) {
   persistSelection(raffle.campaign?.id, raffleSelectorState.selected);
   raffleSelectorState.notice = `Elegimos ${quantity} boleta${quantity === 1 ? "" : "s"} con números disponibles al azar. Puedes continuar al pago o cambiar cualquier número.`;
   raffleSelectorState.noticeTone = "success";
-  return true;
+  return pack;
 }
 
-function continueRaffleSelectionToPayment() {
+function continueRaffleSelectionToPayment(quickPackage = null) {
   const raffle = raffleSelectorState.raffle || null;
   if (!raffle || raffleSelectorState.loading || raffleSelectorState.error) return;
   const selected = getCurrentRaffleSelection(raffle.campaign.id);
@@ -3338,7 +3466,7 @@ function continueRaffleSelectionToPayment() {
   const site = raffleSelectorState.site || window.__PUBLIC_SITE_STATE__?.site || null;
   const slug = raffleSelectorState.slug || window.__PUBLIC_SITE_STATE__?.slug || "";
   closeRaffleSelector();
-  openPaymentModal({ site, slug, raffle, selected });
+  openPaymentModal({ site, slug, raffle: quickPackage ? { ...raffle, quickPackage } : raffle, selected });
 }
 
 async function fetchRaffleSelectorNumbers({ silent = false } = {}) {
@@ -3420,8 +3548,9 @@ async function fetchRaffleSelectorNumbers({ silent = false } = {}) {
     raffleSelectorState.loading = false;
     raffleSelectorState.error = "";
     if (raffleSelectorState.quickPackageQuantity) {
-      if (applyQuickPackageSelection(payloadNumbers)) {
-        continueRaffleSelectionToPayment();
+      const pack = applyQuickPackageSelection(payloadNumbers);
+      if (pack) {
+        continueRaffleSelectionToPayment(pack);
         return;
       }
     } else {
@@ -3716,6 +3845,10 @@ async function submitPublicPseCheckout() {
         },
         body: JSON.stringify({
           selected_numbers: groupRaffleSelections(selected, selectionSummary.groupSize),
+          ...(raffle.quickPackage ? {
+            quick_package_quantity: raffle.quickPackage.quantity,
+            quick_package_price: raffle.quickPackage.value,
+          } : {}),
           ...getPaymentModalContactPayload(),
         }),
         cache: "no-store",
@@ -3787,6 +3920,10 @@ async function submitPublicReceiptUpload(file = null) {
   try {
     const formData = new FormData();
     formData.append("selected_numbers", JSON.stringify(groupRaffleSelections(selected, selectionSummary.groupSize)));
+    if (raffle.quickPackage) {
+      formData.append("quick_package_quantity", String(raffle.quickPackage.quantity));
+      formData.append("quick_package_price", String(raffle.quickPackage.value));
+    }
     formData.append("receipt_file", file, file.name || (supportUploadMode ? "captura" : "comprobante"));
     formData.append("support_upload", supportUploadMode ? "true" : "false");
     const contactPayload = getPaymentModalContactPayload();
@@ -5840,7 +5977,7 @@ async function refreshFeaturedRaffleAdvance(site, slug) {
 
     try {
       const response = await fetch(
-        `${API_BASE_URL}/public-site/${encodeURIComponent(slug)}/raffles/${encodeURIComponent(campaignId)}/availability?limit=1`,
+        `${API_BASE_URL}/public-site/${encodeURIComponent(slug)}/raffles/${encodeURIComponent(campaignId)}/availability?summary=1`,
       );
       if (!response.ok) {
         return;
@@ -6010,7 +6147,7 @@ app.addEventListener("click", (event) => {
   const packageButton = event.target.closest("[data-raffle-package][data-raffle-id]");
   if (packageButton && app.contains(packageButton)) {
     event.preventDefault();
-    openRaffleSelector(
+    openQuickPackagePayment(
       packageButton.getAttribute("data-raffle-id") || "",
       packageButton.getAttribute("data-raffle-package") || "0",
     );
@@ -6114,6 +6251,15 @@ app.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
     stepRaffleCarousel(1);
+    return;
+  }
+
+  if (actionName === "retry-quick-package") {
+    event.preventDefault();
+    const raffle = paymentModalState.raffle;
+    if (raffle?.quickPackage) {
+      void openQuickPackagePayment(raffle.campaign.id, raffle.quickPackage.quantity, true);
+    }
     return;
   }
 
@@ -6755,6 +6901,7 @@ async function loadSite() {
   try {
     const site = await fetchPublicSitePayload(slug);
     renderShell(site, slug);
+    prefetchQuickPackages(site, slug);
     void refreshFeaturedRaffleAdvance(site, slug);
     scheduleDeferredPublicMedia(site, slug);
   } catch (error) {
