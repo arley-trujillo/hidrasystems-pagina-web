@@ -160,7 +160,8 @@ function scheduleDeferredPublicMedia(site, slug) {
     }
   };
   const videosSection = app.querySelector("#videos");
-  if (!videosSection || typeof window.IntersectionObserver !== "function") {
+  if (!videosSection) return;
+  if (typeof window.IntersectionObserver !== "function") {
     window.setTimeout(() => { void loadWinnerVideos(); }, 1800);
     return;
   }
@@ -4094,39 +4095,28 @@ function renderTrustStrip(site) {
 
 function renderHowItWorks() {
   const steps = [
-    ["Escoge tus números", "Selecciona los números que más te gusten."],
-    ["Realiza el pago", "Paga por el medio que prefieras."],
-    ["Env·a comprobante", "Sube el soporte desde WhatsApp."],
-    ["Recibe tu boleta", "La boleta queda lista para seguimiento."],
+    "Escoge tu paquete o tus números",
+    "Diligencia tus datos",
+    "Escoge el medio de pago y envía el comprobante",
+    "Recibe tu boleta por WhatsApp",
   ];
 
   return `
     <section class="section shell section-anchor how-it-works-section" id="como-participar">
-      <div class="how-it-works-panel">
-        <div class="section-head how-it-works-head">
-          <div>
-            <span class="section-kicker">Proceso simple</span>
-            <h2>Compra en menos de 2 minutos</h2>
-            <p>Una ruta clara y rápida para pasar de ver el sorteo a tener tu boleta registrada.</p>
-          </div>
-          <div class="how-it-works-note">Selecciona, paga y recibe seguimiento</div>
-        </div>
-        <div class="how-it-works-track">
+      <div class="purchase-guide">
+        <h2>Guía de compra</h2>
+        <ol class="purchase-guide-steps" role="list">
           ${steps
             .map(
-              ([title, text], index) => `
-                <article class="step-card premium-step">
-                  <div class="step-card-top">
-                    <div class="step-number">${index + 1}</div>
-                    ${index < steps.length - 1 ? '<span class="step-connector"></span>' : ""}
-                  </div>
+              (title, index) => `
+                <li class="purchase-guide-step">
+                  <span class="purchase-guide-number" aria-hidden="true">${index + 1}</span>
                   <strong>${escapeHtml(title)}</strong>
-                  <p>${escapeHtml(text)}</p>
-                </article>
+                </li>
               `,
             )
             .join("")}
-        </div>
+        </ol>
       </div>
     </section>
   `;
@@ -5703,7 +5693,6 @@ function renderShell(site, slug) {
     ["Inicio", "#inicio"],
     ["Sorteos", "#sorteos"],
     ["Cómo participar", "#como-participar"],
-    ["Ganadores", "#videos"],
     ["Ayuda", "#faq"],
   ];
   const topNavLinks = footerQuickLinks;
@@ -5776,7 +5765,6 @@ function renderShell(site, slug) {
                 <div class="hero-actions">
                   ${heroButton ? `<a class="button gold" href="${escapeHtml(heroButton)}"${String(heroButton).startsWith("#") ? "" : ' target="_blank" rel="noreferrer"'}>${escapeHtml(heroLabel)}</a>` : ""}
                   <button type="button" class="button secondary hero-secondary" data-action="open-raffle-results">Resultados</button>
-                  <a class="button secondary hero-secondary" href="#videos">Ver Ganadores</a>
                 </div>
               </div>
 
@@ -5813,8 +5801,6 @@ function renderShell(site, slug) {
           </div>
         </section>
 
-        ${renderTrustStrip(site)}
-
           <section class="section shell section-anchor" id="sorteos">
             <div class="section-head">
               <div>
@@ -5841,16 +5827,6 @@ function renderShell(site, slug) {
           ${renderSections(site, paymentSections, "Metodos de pago", "Bloques administrables desde el panel.") }
           </section>
         ` : ""}
-
-          <section class="section shell section-anchor" id="videos">
-            <div class="section-head">
-              <div>
-                <h2>Videos y testimonios</h2>
-                <p>Mira entregas, testimonios y apoyos sociales que el administrador decida publicar.</p>
-              </div>
-          </div>
-          ${renderWinnerVideos(site)}
-        </section>
 
           <section class="section shell section-anchor" id="faq">
             <div class="section-head">
@@ -5888,15 +5864,6 @@ function renderShell(site, slug) {
 
         <section class="section shell footer-shell">
           <div class="footer-card footer-card-premium">
-            <div class="footer-brand">
-              <div class="footer-brand-mark">
-                <img data-public-logo src="${escapeHtml(settings.logoUrl || company.logo || ASSETS.brand)}" alt="${escapeHtml(company.nombre || settings.title || "Logo")}" loading="lazy" decoding="async" />
-              </div>
-              <div class="footer-brand-copy">
-                <strong>${escapeHtml(company.nombre || settings.title || "Rifas publicas")}</strong>
-                <p>${escapeHtml(settings.slogan || settings.subtitle || "Tu portal de rifas y ganadores")}</p>
-              </div>
-            </div>
             <div class="footer-links">
               <span class="footer-label">Navegación</span>
               <div class="footer-link-list">

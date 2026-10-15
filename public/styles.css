@@ -1178,6 +1178,81 @@ button {
   padding-top: 0;
 }
 
+.purchase-guide {
+  padding: 18px 20px;
+  border-radius: 22px;
+  background: linear-gradient(135deg, #fff, #fff9ed);
+  border: 1px solid rgba(15, 23, 42, 0.07);
+}
+
+.purchase-guide h2 {
+  margin: 0 0 12px;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.purchase-guide-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.purchase-guide-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+}
+
+.purchase-guide-number {
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  height: 30px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #102d47, #d9a441);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.purchase-guide-step strong {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+@media (max-width: 900px) {
+  .purchase-guide-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .purchase-guide {
+    padding: 14px;
+  }
+
+  .purchase-guide h2 {
+    font-size: 20px;
+  }
+
+  .purchase-guide-steps {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .purchase-guide-step {
+    padding: 8px 10px;
+  }
+}
+
 .how-it-works-panel {
   padding: 28px;
   border-radius: 32px;
@@ -3578,7 +3653,7 @@ button {
   position: relative;
   overflow: hidden;
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(180px, 0.9fr) minmax(210px, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 30px;
   align-items: start;
   padding: 32px;
