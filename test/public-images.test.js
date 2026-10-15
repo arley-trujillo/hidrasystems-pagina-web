@@ -7,6 +7,7 @@ const source = fs.readFileSync(new URL("../public/app.js", import.meta.url), "ut
 function context(payload) {
   const requests = [];
   const ctx = {
+    window: {},
     API_BASE_URL: "https://api.example.com",
     PUBLIC_SITE_FETCH_ATTEMPTS: 3,
     PUBLIC_SITE_RETRY_DELAYS_MS: [0, 0, 0],

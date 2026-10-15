@@ -6,10 +6,7 @@
     <meta name="theme-color" content="#0f172a" />
     <title>Rifas Public Site</title>
     <link rel="preconnect" href="https://hidrasystems-backend.onrender.com" crossorigin />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;700;800;900&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=20261007" />
+    <link rel="preload" href="/app.js?v=20261015-hero-inline" as="script" />
     <!-- Meta Pixel pausado temporalmente. -->
     <script src="/config.js?v=20261007"></script>
     <script>
@@ -18,7 +15,35 @@
         mode: "raffles"
       };
     </script>
-    <script defer src="/app.js?v=20261007"></script>
+    <script data-public-site-bootstrap>
+      // Pedir datos antes de esperar la hoja de estilos y la aplicacion completa.
+      (function () {
+        var config = window.__PUBLIC_SITE_CONFIG__ || {};
+        if (config.mode !== "raffles") return;
+        var page = new URL(window.location.href);
+        var slug = String(page.searchParams.get("slug") || page.pathname)
+          .toLowerCase().trim().replace(/^\/+|\/+$/g, "").split("/").filter(Boolean)[0] || "";
+        if (!slug || slug === "negocio" || slug === "retail") return;
+        var api = String(config.apiBaseUrl || "").trim().replace(/\/+$/, "");
+        if (!api || api.indexOf("__") === 0) {
+          api = /^(localhost|127\.0\.0\.1)$/.test(page.hostname)
+            ? "http://localhost:10000" : "https://hidrasystems-backend.onrender.com";
+        }
+        var url = api + "/public-site/" + encodeURIComponent(slug) + "?fast=1&images=urls";
+        window.__PUBLIC_SITE_BOOTSTRAP__ = {
+          url: url,
+          promise: fetch(url, { cache: "no-store" })
+            .then(function (response) { return { response: response }; })
+            .catch(function (error) { return { error: error }; })
+        };
+      }());
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;700;800;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;700;800;900&display=swap" rel="stylesheet" /></noscript>
+    <link rel="stylesheet" href="/styles.css?v=20261015-hero-inline" />
+    <script defer src="/app.js?v=20261015-hero-inline"></script>
     <script>
       document.addEventListener('DOMContentLoaded', function () {
         var match = window.location.pathname.match(/^\/(?:negocio|retail)\/([^/]+)/);
