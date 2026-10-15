@@ -995,6 +995,61 @@ button {
 .quick-package-button span { color: #9a6700; font-size: 12px; font-weight: 800; }
 .quick-package-button:hover { border-color: #d79f22; background: #fff7d8; transform: translateY(-1px); }
 
+/* Compra rapida: opciones visibles en la tarjeta del sorteo activo. */
+.quick-package-actions {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 16px;
+  gap: 10px;
+  border: 1px solid #e8c66a;
+  border-radius: 18px;
+  background: #fffbeb;
+}
+.quick-package-actions .quick-package-label {
+  color: #0b2340;
+  font-size: 21px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.quick-package-description { margin: 0; color: #475569; font-size: 13px; line-height: 1.5; }
+.quick-package-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.quick-package-list .quick-package-button {
+  min-width: 0;
+  min-height: 104px;
+  padding: 14px 10px;
+  gap: 5px;
+  text-align: center;
+  border: 2px solid #e2b43b;
+  background: #fff;
+}
+.quick-package-button strong { font-size: 16px; }
+.quick-package-button span { font-size: 21px; color: #0b2340; }
+.quick-package-button small { color: #735000; font-size: 12px; font-weight: 700; }
+.quick-package-button:focus-visible { outline: 3px solid #0b2340; outline-offset: 3px; }
+.raffle-feature-body.raffle-feature-body-packages {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "chips" "price" "title" "copy" "progress" "meta" "action";
+}
+.raffle-feature:has(.raffle-feature-body-packages) .raffle-feature-media {
+  min-width: 0;
+  width: 100%;
+  aspect-ratio: auto;
+}
+.raffle-feature-body-packages > .raffle-price-label,
+.raffle-feature-body-packages > .raffle-price-summary { display: none; }
+.raffle-feature-body-packages .raffle-feature-actions {
+  width: 100%;
+  justify-self: stretch;
+  margin-top: 16px;
+}
+.raffle-feature .raffle-feature-body-packages .button.js-open-raffle-selector {
+  background: #f1f5f9;
+  box-shadow: none;
+  border: 1px solid #cbd5e1;
+}
+.raffle-carousel-card-actions:has(.quick-package-actions),
+.raffle-card-actions:has(.quick-package-actions) { flex-direction: column; align-items: stretch; }
+
 .raffle-carousel-slide.is-active {
   opacity: 1;
   transform: translateX(0) scale(1);
