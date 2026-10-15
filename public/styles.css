@@ -439,6 +439,35 @@ button {
   padding: 36px;
 }
 
+.hero-banner-only .hero-grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  padding: clamp(12px, 2vw, 24px);
+}
+
+.hero-banner-only .hero-media {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto auto;
+}
+
+.hero-banner-only .hero-media > img {
+  height: auto;
+  max-height: 480px;
+  object-fit: contain;
+}
+
+.hero-banner-only .hero-media > .embedded-video {
+  height: auto;
+  aspect-ratio: 16 / 9;
+  max-height: 480px;
+}
+
+.hero-banner-only .hero-actions {
+  margin-top: 0;
+}
+
 .hero-copy {
   display: grid;
   align-content: center;

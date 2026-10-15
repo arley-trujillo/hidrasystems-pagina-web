@@ -24,6 +24,21 @@ function waitForPublicSiteRetry(delayMs) {
     : Promise.resolve();
 }
 
+function resolvePublicSiteImageUrls(site) {
+  const resolve = (value) => typeof value === "string" && value.startsWith("/public-site/")
+    ? `${API_BASE_URL}${value}`
+    : value;
+  if (site.company) site.company.logo = resolve(site.company.logo);
+  if (site.settings) {
+    site.settings.logoUrl = resolve(site.settings.logoUrl);
+    site.settings.heroImageUrl = resolve(site.settings.heroImageUrl);
+  }
+  for (const raffle of Array.isArray(site.activeRaffles) ? site.activeRaffles : []) {
+    if (raffle.publicConfig) raffle.publicConfig.coverImageUrl = resolve(raffle.publicConfig.coverImageUrl);
+  }
+  return site;
+}
+
 async function fetchPublicSitePayload(slug) {
   const normalizedSlug = normalizeSlug(slug);
   if (!normalizedSlug) {
@@ -38,7 +53,7 @@ async function fetchPublicSitePayload(slug) {
       // La portada es parte esencial de la tarjeta principal. Cargarla desde la
       // primera respuesta evita mostrar una imagen de plantilla y reemplazarla
       // segundos después por la portada real del sorteo.
-      const query = new URLSearchParams({ fast: "1" });
+      const query = new URLSearchParams({ fast: "1", images: "urls" });
       if (attempt > 0) {
         query.set("retry", String(attempt));
       }
@@ -54,7 +69,7 @@ async function fetchPublicSitePayload(slug) {
       }
 
       const site = await response.json();
-      return site && typeof site === "object" ? site : null;
+      return site && typeof site === "object" ? resolvePublicSiteImageUrls(site) : null;
     } catch (error) {
       lastError = error;
       const status = Number(error?.responseStatus || 0);
@@ -1228,6 +1243,7 @@ function triggerRaffleResultsConfetti() {
 }
 
 async function openRaffleResultsModal() {
+  if (window.__PUBLIC_SITE_STATE__?.site?.settings?.showResults === false) return;
   const slug = String(window.__PUBLIC_SITE_STATE__?.slug || "").trim();
   if (!slug) return;
 
@@ -1249,6 +1265,13 @@ async function openRaffleResultsModal() {
     }
     if (requestId !== raffleResultsModalState.requestId) return;
 
+    if (payload?.showResults === false) {
+      const site = window.__PUBLIC_SITE_STATE__?.site;
+      if (site?.settings) site.settings.showResults = false;
+      document.querySelectorAll('[data-action="open-raffle-results"]').forEach(button => button.remove());
+      closeRaffleResultsModal();
+      return;
+    }
     const results = asArray(payload?.results);
     raffleResultsModalState.results = results;
     raffleResultsModalState.selectedSeriesId = String(results[0]?.id || "");
@@ -5736,34 +5759,19 @@ function renderShell(site, slug) {
           </div>
           <nav class="top-nav top-nav-desktop" aria-label="Navegación principal">
             ${topNavLinks.map(([label, href]) => `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>`).join("")}
-            <button type="button" class="top-nav-button" data-action="open-raffle-results">Resultados</button>
+            ${settings.showResults !== false ? '<button type="button" class="top-nav-button" data-action="open-raffle-results">Resultados</button>' : ""}
           </nav>
           <div class="topbar-mobile-panel" id="topbar-mobile-menu" data-mobile-nav-panel ${publicUiState.mobileMenuOpen ? "" : "hidden"}>
             ${topNavLinks.map(([label, href]) => `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>`).join("")}
-            <button type="button" class="topbar-mobile-results" data-action="open-raffle-results">Resultados de sorteos</button>
+            ${settings.showResults !== false ? '<button type="button" class="topbar-mobile-results" data-action="open-raffle-results">Resultados de sorteos</button>' : ""}
           </div>
         </div>
         </header>
 
       <main>
-        <section class="hero" id="inicio">
+        <section class="hero hero-banner-only" id="inicio">
           <div class="shell hero-card">
             <div class="hero-grid">
-              <div class="hero-copy">
-                <div class="hero-company-line">${escapeHtml(settings.title || company.nombre || heroTitle || "Rifas publicas")}</div>
-                <div class="hero-brand">
-                  <div class="hero-brand-mark">
-                    <img data-public-logo src="${escapeHtml(settings.logoUrl || company.logo || ASSETS.brand)}" alt="${escapeHtml(company.nombre || settings.title || "Logo")}" loading="lazy" decoding="async" />
-                  </div>
-                </div>
-                ${slogan ? `<p class="hero-slogan">${escapeHtml(slogan)}</p>` : ""}
-                ${heroGreeting ? `<div class="hero-raffle-greeting">${escapeHtml(heroGreeting)}</div>` : ""}
-                <div class="hero-actions">
-                  ${heroButton ? `<a class="button gold" href="${escapeHtml(heroButton)}"${String(heroButton).startsWith("#") ? "" : ' target="_blank" rel="noreferrer"'}>${escapeHtml(heroLabel)}</a>` : ""}
-                  <button type="button" class="button secondary hero-secondary" data-action="open-raffle-results">Resultados</button>
-                </div>
-              </div>
-
                 <div class="hero-media hero-media-with-footer">
                 ${heroVideo ? renderInlineVideo(heroVideo, heroTitle) : `<img ${heroSpotlightMediaAttribute} src="${escapeHtml(heroSpotlightImage)}" alt="${escapeHtml(heroSpotlightTitle)}" loading="eager" fetchpriority="high" decoding="async" />`}
                 ${featuredRaffle ? `
@@ -5792,6 +5800,10 @@ function renderShell(site, slug) {
                     ${renderRaffleAdvanceBlock(featuredRaffle)}
                   </div>
                 ` : ""}
+              </div>
+              <div class="hero-actions">
+                ${heroButton ? `<a class="button gold" href="${escapeHtml(heroButton)}"${String(heroButton).startsWith("#") ? "" : ' target="_blank" rel="noreferrer"'}>${escapeHtml(heroLabel)}</a>` : ""}
+                ${settings.showResults !== false ? '<button type="button" class="button secondary hero-secondary" data-action="open-raffle-results">Resultados</button>' : ""}
               </div>
             </div>
           </div>
