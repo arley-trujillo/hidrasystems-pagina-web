@@ -34,7 +34,12 @@ function resolvePublicSiteImageUrls(site) {
     site.settings.heroImageUrl = resolve(site.settings.heroImageUrl);
   }
   for (const raffle of Array.isArray(site.activeRaffles) ? site.activeRaffles : []) {
-    if (raffle.publicConfig) raffle.publicConfig.coverImageUrl = resolve(raffle.publicConfig.coverImageUrl);
+    if (raffle.publicConfig) {
+      raffle.publicConfig.coverImageUrl = resolve(raffle.publicConfig.coverImageUrl);
+      if (Array.isArray(raffle.publicConfig.galleryImageUrls)) {
+        raffle.publicConfig.galleryImageUrls = raffle.publicConfig.galleryImageUrls.map(resolve);
+      }
+    }
   }
   return site;
 }
@@ -110,22 +115,12 @@ function applyDeferredImageSource(selector, source) {
 }
 
 function applyDeferredPublicMedia(site, media = {}) {
-  const coversByRaffleId = new Map(
+  const mediaByRaffleId = new Map(
     asArray(media?.raffles)
-      .filter((item) => item?.raffleId && item?.coverImageUrl)
-      .map((item) => [String(item.raffleId), item.coverImageUrl]),
+      .filter((item) => item?.raffleId)
+      .map((item) => [String(item.raffleId), item]),
   );
-  const logo = media?.settings?.logoUrl || media?.company?.logo || "";
-  const heroImage = media?.settings?.heroImageUrl || "";
-
-  applyDeferredImageSource("[data-public-logo]", logo);
-  applyDeferredImageSource("[data-public-hero-image]", heroImage);
-  app.querySelectorAll("[data-public-raffle-image]").forEach((image) => {
-    const source = coversByRaffleId.get(String(image.dataset.publicRaffleImage || ""));
-    if (source) image.setAttribute("src", String(source));
-  });
-
-  const hydratedSite = {
+  const hydratedSite = resolvePublicSiteImageUrls({
     ...site,
     company: { ...site.company, logo: media?.company?.logo || site?.company?.logo || null },
     settings: {
@@ -134,14 +129,36 @@ function applyDeferredPublicMedia(site, media = {}) {
       heroImageUrl: media?.settings?.heroImageUrl || site?.settings?.heroImageUrl || null,
     },
     activeRaffles: asArray(site.activeRaffles).map((raffle) => {
-      const coverImageUrl = coversByRaffleId.get(String(raffle?.campaign?.id || raffle?.campaignId || ""));
-      if (!coverImageUrl) return raffle;
+      const raffleMedia = mediaByRaffleId.get(String(raffle?.campaign?.id || raffle?.campaignId || ""));
+      if (!raffleMedia) return raffle;
       return {
         ...raffle,
-        publicConfig: { ...raffle.publicConfig, coverImageUrl },
+        publicConfig: {
+          ...raffle.publicConfig,
+          ...(raffleMedia.coverImageUrl ? { coverImageUrl: raffleMedia.coverImageUrl } : {}),
+          ...(Array.isArray(raffleMedia.galleryImageUrls) ? { galleryImageUrls: raffleMedia.galleryImageUrls } : {}),
+        },
       };
     }),
-  };
+  });
+  const rafflesById = new Map(hydratedSite.activeRaffles.map((raffle) => [String(raffle?.campaign?.id || raffle?.campaignId || ""), raffle]));
+  applyDeferredImageSource("[data-public-logo]", hydratedSite.settings.logoUrl || hydratedSite.company.logo);
+  applyDeferredImageSource("[data-public-hero-image]", hydratedSite.settings.heroImageUrl);
+  app.querySelectorAll("[data-public-raffle-image]").forEach((image) => {
+    // La galería preserva la foto elegida; otros contextos mantienen su portada.
+    if (image.closest("[data-raffle-gallery]")) return;
+    const source = rafflesById.get(String(image.dataset.publicRaffleImage || ""))?.publicConfig?.coverImageUrl;
+    if (source) image.setAttribute("src", String(source));
+  });
+  app.querySelectorAll("[data-raffle-gallery]").forEach((gallery) => {
+    const raffle = rafflesById.get(gallery.dataset.raffleGallery);
+    if (!raffle) return;
+    const currentSource = gallery.querySelector("[data-public-raffle-image]")?.getAttribute("src");
+    const index = Math.max(0, getRaffleDisplayImages(raffle, hydratedSite).indexOf(currentSource));
+    gallery.querySelector(".raffle-image-navigation")?.remove();
+    gallery.insertAdjacentHTML("beforeend", renderRaffleImageNavigation(raffle, hydratedSite));
+    updateRaffleGalleryImage(gallery, raffle, hydratedSite, index);
+  });
 
   if (window.__PUBLIC_SITE_STATE__?.slug === normalizeSlug(getSlugFromLocation())) {
     window.__PUBLIC_SITE_STATE__.site = hydratedSite;
@@ -211,7 +228,7 @@ const PUBLIC_SITE_MODE = (() => {
   return "raffles";
 })();
 const PUBLIC_SITE_CACHE_PREFIX = "public-site-cache:v2:";
-const RAFFLE_SELECTOR_SEARCH_DELAY_MS = 1500;
+const RAFFLE_SELECTOR_SEARCH_DELAY_MS = 250;
 const ASSETS = {
   brand: "/assets/logo-placeholder.webp",
   hero: "/assets/hero-caballo.webp",
@@ -221,7 +238,7 @@ const ASSETS = {
   pse: "/assets/pse-logo.svg",
 };
 const RAFFLE_SELECTOR_LIMIT = 100;
-const RAFFLE_SELECTOR_PAGE_SIZE = 100;
+const RAFFLE_SELECTOR_PAGE_SIZE = 50;
 const raffleSelectorState = {
   open: false,
   site: null,
@@ -462,9 +479,64 @@ function getRaffleDisplayImage(raffle = {}, site = {}) {
   return (
     raffle?.publicConfig?.coverImageUrl
     || raffle?.coverImageUrl
+    || asArray(raffle?.publicConfig?.galleryImageUrls).find((value) => typeof value === "string" && value.trim())
     || site?.settings?.heroImageUrl
     || ASSETS.raffle
   );
+}
+
+function getRaffleDisplayImages(raffle = {}, site = {}) {
+  const additionalImages = asArray(raffle?.publicConfig?.galleryImageUrls).slice(0, 5);
+  return [...new Set([getRaffleDisplayImage(raffle, site), ...additionalImages]
+    .filter((value) => typeof value === "string" && value.trim())
+    .map((value) => value.trim()))];
+}
+
+function renderRaffleImageNavigation(raffle = {}, site = {}) {
+  const images = getRaffleDisplayImages(raffle, site);
+  if (images.length < 2) return "";
+  const title = escapeAttr(getRaffleDisplayTitle(raffle));
+  return `
+    <div class="raffle-image-navigation" role="group" aria-label="Imágenes de ${title}">
+      <button type="button" data-raffle-image-step="-1" aria-label="Imagen anterior de ${title}" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg>
+      </button>
+      <span data-raffle-image-status aria-live="polite" aria-atomic="true">1 / ${images.length}</span>
+      <button type="button" data-raffle-image-step="1" aria-label="Imagen siguiente de ${title}">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6" /></svg>
+      </button>
+    </div>
+  `;
+}
+
+function changeRaffleImage(button) {
+  const gallery = button?.closest("[data-raffle-gallery]");
+  if (!gallery || button.disabled) return;
+  const site = window.__PUBLIC_SITE_STATE__?.site;
+  const raffle = asArray(site?.activeRaffles)
+    .find((item) => String(item?.campaign?.id || "") === gallery.dataset.raffleGallery);
+  if (!raffle) return;
+  const images = getRaffleDisplayImages(raffle, site);
+  const step = Number(button.dataset.raffleImageStep);
+  if (images.length < 2 || ![-1, 1].includes(step)) return;
+  const current = Number(gallery.dataset.raffleImageIndex || 0);
+  const index = Math.max(0, Math.min(images.length - 1, (Number.isFinite(current) ? current : 0) + step));
+  updateRaffleGalleryImage(gallery, raffle, site, index);
+}
+
+function updateRaffleGalleryImage(gallery, raffle, site, index) {
+  const images = getRaffleDisplayImages(raffle, site);
+  const image = gallery.querySelector("[data-public-raffle-image]");
+  if (!image || !images[index]) return;
+  // Solo se descarga la imagen elegida; las adicionales no se precargan.
+  image.setAttribute("src", images[index]);
+  image.setAttribute("alt", `${getRaffleDisplayTitle(raffle)}: imagen ${index + 1} de ${images.length}`);
+  gallery.dataset.raffleImageIndex = String(index);
+  const status = gallery.querySelector("[data-raffle-image-status]");
+  if (status) status.textContent = `${index + 1} / ${images.length}`;
+  gallery.querySelectorAll("[data-raffle-image-step]").forEach((control) => {
+    control.disabled = Number(control.dataset.raffleImageStep) < 0 ? index === 0 : index === images.length - 1;
+  });
 }
 
 function getRaffleDisplayPrice(raffle = {}) {
@@ -1315,7 +1387,7 @@ function renderPublicChatWidget(site, slug) {
   const companyName = site?.company?.nombre || site?.settings?.title || "Atencion en linea";
   return `
     <div class="public-chat" data-public-chat-root>
-      <section class="public-chat-panel" data-public-chat-panel hidden aria-label="Chat de ${escapeAttr(companyName)}">
+      <section id="public-chat-panel" class="public-chat-panel" data-public-chat-panel hidden aria-label="Chat de ${escapeAttr(companyName)}">
         <header class="public-chat-header">
           <div class="public-chat-avatar" aria-hidden="true">
             <img data-public-logo src="${escapeAttr(site?.settings?.logoUrl || site?.company?.logo || ASSETS.brand)}" alt="" />
@@ -1355,10 +1427,22 @@ function renderPublicChatWidget(site, slug) {
           </form>
         </div>
       </section>
-      <button type="button" class="public-chat-launcher" data-action="toggle-public-chat" aria-expanded="false" aria-label="Abrir chat de atencion">
-        <span class="public-chat-launcher-pulse"></span>
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5.8A2.8 2.8 0 0 1 6.8 3h10.4A2.8 2.8 0 0 1 20 5.8v7.4a2.8 2.8 0 0 1-2.8 2.8H10l-5.2 4v-4.4A2.8 2.8 0 0 1 4 13.2V5.8Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 8h8M8 12h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        <span>¿Necesita ayuda?</span>
+      <button type="button" class="public-chat-launcher" data-action="toggle-public-chat" aria-expanded="false" aria-controls="public-chat-panel" aria-label="Abrir chat de atención" title="Chat de atención">
+        <span class="public-chat-launcher-pulse" aria-hidden="true"></span>
+        <svg viewBox="0 0 64 64" fill="none" aria-hidden="true" focusable="false">
+          <defs>
+            <linearGradient id="public-chat-launcher-gradient" x1="6" y1="6" x2="58" y2="58" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#08192f" />
+              <stop offset="1" stop-color="#123c3a" />
+            </linearGradient>
+          </defs>
+          <path d="M18 6h28a12 12 0 0 1 12 12v22a12 12 0 0 1-12 12H26L12 61V50.5A12 12 0 0 1 6 40V18A12 12 0 0 1 18 6Z" fill="url(#public-chat-launcher-gradient)" stroke="#ffd66b" stroke-opacity="0.3" stroke-linejoin="round" />
+          <g fill="currentColor">
+            <circle cx="22" cy="29" r="3" />
+            <circle cx="32" cy="29" r="3" />
+            <circle cx="42" cy="29" r="3" />
+          </g>
+        </svg>
       </button>
     </div>
   `;
@@ -2043,8 +2127,9 @@ function renderRaffles(site) {
     if (featuredMode) {
       return `
         <article class="raffle-feature">
-          <div class="raffle-feature-media">
+          <div class="raffle-feature-media" data-raffle-gallery="${escapeAttr(String(campaign?.id || ""))}">
             <img data-public-raffle-image="${escapeAttr(String(campaign?.id || ""))}" src="${escapeHtml(image)}" alt="${escapeHtml(heroTitle)}" loading="eager" fetchpriority="high" decoding="async" />
+            ${renderRaffleImageNavigation({ campaign, publicConfig }, site)}
             <div class="raffle-feature-badge">${isFeatured ? "Sorteo destacado" : "Sorteo disponible"}</div>
           </div>
             <div class="raffle-feature-body ${renderQuickPackageActions({ campaign, publicConfig }) ? "raffle-feature-body-packages" : ""}">
@@ -2076,8 +2161,9 @@ function renderRaffles(site) {
 
     return `
       <article class="raffle-card raffle-card-compact">
-        <div class="raffle-card-media">
+        <div class="raffle-card-media" data-raffle-gallery="${escapeAttr(String(campaign?.id || ""))}">
           <img data-public-raffle-image="${escapeAttr(String(campaign?.id || ""))}" src="${escapeHtml(image)}" alt="${escapeHtml(heroTitle)}" loading="lazy" decoding="async" />
+          ${renderRaffleImageNavigation({ campaign, publicConfig }, site)}
           ${isFeatured ? `<div class="card-flag">Destacado</div>` : ""}
         </div>
         <div class="raffle-card-body">
@@ -2122,8 +2208,9 @@ function renderRaffles(site) {
 
     return `
       <article class="raffle-carousel-card">
-        <div class="raffle-carousel-card-media">
+        <div class="raffle-carousel-card-media" data-raffle-gallery="${escapeAttr(String(campaign?.id || ""))}">
           <img data-public-raffle-image="${escapeAttr(String(campaign?.id || ""))}" src="${escapeHtml(image)}" alt="${escapeHtml(heroTitle)}" loading="${index === 0 ? "eager" : "lazy"}" fetchpriority="${index === 0 ? "high" : "auto"}" decoding="async" />
+          ${renderRaffleImageNavigation({ campaign, publicConfig }, site)}
           <div class="raffle-carousel-card-badge">${index === 0 ? "Sorteo destacado" : "Sorteo activo"}</div>
         </div>
         <div class="raffle-carousel-card-body">
@@ -2500,21 +2587,6 @@ function renderRaffleSelectorContent() {
   };
   const selectedAmount = selectionSummary.total;
   const fidelitySingleTicketOnly = Boolean(selectionSummary.supportUploadMode);
-  const progressPercent = selectionSummary.groupSize > 0
-    ? Math.min(100, Math.round((selectionSummary.totalNumbers / selectionSummary.groupSize) * 100))
-    : 0;
-  const progressMarkup = selected.length ? `
-    <div class="selector-progress">
-      <div class="selector-progress-row">
-        <span class="selector-progress-chip is-active">${selectionSummary.totalNumbers} numero${selectionSummary.totalNumbers === 1 ? "" : "s"}</span>
-        <span class="selector-progress-chip">${selectionSummary.completeTickets} boleta${selectionSummary.completeTickets === 1 ? "" : "s"} completa${selectionSummary.completeTickets === 1 ? "" : "s"}</span>
-        <span class="selector-progress-chip ${selectionSummary.isComplete ? "is-ready" : "is-warning"}">${selectionSummary.isComplete ? "Listo para pagar" : `Faltan ${selectionSummary.missingForNext}`}</span>
-      </div>
-      <div class="selector-progress-bar" aria-hidden="true">
-        <span style="width: ${progressPercent}%"></span>
-      </div>
-    </div>
-  ` : "";
   const selectedCopy = selected.length
     ? selected
       .map((item) => `
@@ -2533,8 +2605,7 @@ function renderRaffleSelectorContent() {
   const pagination = getRaffleSelectorPagination(numbers);
   const numbersHtml = raffleSelectorState.loading
     ? `
-      <div class="selector-loading-panel">
-        <div class="selector-loading-clock" aria-hidden="true"></div>
+      <div class="selector-loading-panel" role="status">
         <strong>Cargando numeros disponibles...</strong>
         <span>Estamos preparando la seleccion real del sorteo.</span>
       </div>
@@ -2562,24 +2633,10 @@ function renderRaffleSelectorContent() {
     && selectionSummary.isComplete
     && (!fidelitySingleTicketOnly || selectionSummary.completeTickets === 1),
   );
-  const limitInfo = raffleSelectorState.query ? `Resultados para "${escapeHtml(raffleSelectorState.query)}"` : `${numbers.length} numeros visibles`;
-  const pageInfo = numbers.length > 0
-    ? `Página ${pagination.page} de ${pagination.totalPages}`
-    : "Sin paginacion";
-  const pageRange = numbers.length > 0
-    ? `${pagination.start + 1}-${pagination.end}`
-    : "";
+  const limitInfo = raffleSelectorState.query ? `Resultados para "${escapeHtml(raffleSelectorState.query)}"` : "";
   const notice = raffleSelectorState.notice
     ? `<div class="selector-notice selector-notice-${escapeHtml(raffleSelectorState.noticeTone || "info")}">${escapeHtml(raffleSelectorState.notice)}</div>`
     : `<div class="selector-notice selector-notice-placeholder" aria-hidden="true"></div>`;
-  const liveSummary = `
-    <div class="selector-live-summary ${selected.length ? "is-active" : "is-empty"}">
-      ${progressMarkup}
-      <strong>${selected.length ? `${selectionSummary.completeTickets} boleta${selectionSummary.completeTickets === 1 ? "" : "s"} completas` : "Selecciona tus números para empezar"}</strong>
-      <span>${selected.length ? `${escapeHtml(formatCOP(selectedAmount))} · ${selectionSummary.completeTickets} boleta${selectionSummary.completeTickets === 1 ? "" : "s"} lista${selectionSummary.completeTickets === 1 ? "" : "s"}${selectionSummary.isComplete ? "" : ` · te faltan ${selectionSummary.missingForNext} número${selectionSummary.missingForNext === 1 ? "" : "s"} para completar la siguiente boleta`}` : "Tu total aparecerá aqué al instante."}</span>
-      <p>${selected.length ? `Cada boleta se arma con ${selectionSummary.groupSize} números.${fidelitySingleTicketOnly ? " En fidelizacion solo se permite una boleta por cliente." : ""} ${selectionSummary.isComplete ? `Tienes ${selectionSummary.totalNumbers} números y ya puedes continuar al pago.` : `Llevas ${selectionSummary.totalNumbers} números: ${selectionSummary.completeTickets} boleta${selectionSummary.completeTickets === 1 ? "" : "s"} completa${selectionSummary.completeTickets === 1 ? "" : "s"} y te faltan ${selectionSummary.missingForNext} para la siguiente.`}` : "Toca cualquier número para empezar."}</p>
-    </div>
-  `;
   if (isMobileDevice()) {
     return `
       <div class="selector-head selector-head-mobile">
@@ -2609,21 +2666,17 @@ function renderRaffleSelectorContent() {
             autocomplete="off"
           />
         </label>
-        <div class="selector-toolbar-actions selector-toolbar-actions-mobile">
-          <div class="selector-toolbar-note">${escapeHtml(limitInfo)}</div>
-          <button type="button" class="button secondary selector-refresh" data-action="refresh-raffle-selector">Actualizar</button>
-        </div>
+        ${limitInfo ? `
+          <div class="selector-toolbar-actions selector-toolbar-actions-mobile">
+            <div class="selector-toolbar-note">${escapeHtml(limitInfo)}</div>
+          </div>
+        ` : ""}
       </div>
 
       ${notice}
-      ${liveSummary}
 
-      <div class="selector-mobile-pagination selector-mobile-pagination-compact">
+      <div class="selector-pagination selector-mobile-pagination selector-mobile-pagination-compact">
         <button type="button" class="selector-page-button" data-selector-page="prev" ${pagination.hasPrev ? "" : "disabled"}>Anterior</button>
-        <div class="selector-pagination-current">
-          <span>${escapeHtml(pageInfo)}</span>
-          <strong>${escapeHtml(pageRange)}</strong>
-        </div>
         <button type="button" class="selector-page-button" data-selector-page="next" ${pagination.hasNext ? "" : "disabled"}>Siguiente</button>
       </div>
 
@@ -2634,6 +2687,13 @@ function renderRaffleSelectorContent() {
       </div>
 
       <div class="selector-summary-mobile selector-summary-mobile-inline selector-summary-mobile-compact">
+        ${selected.length ? `
+          <div class="selector-summary-mobile-copy">
+            <strong>${selectionSummary.completeTickets} boleta${selectionSummary.completeTickets === 1 ? "" : "s"} completa${selectionSummary.completeTickets === 1 ? "" : "s"}</strong>
+            <span class="selector-summary-mobile-total">Total: ${escapeHtml(formatCOP(selectedAmount))}</span>
+            <span>Cada boleta se arma con ${selectionSummary.groupSize} número${selectionSummary.groupSize === 1 ? "" : "s"}.${selectionSummary.isComplete ? "" : ` Te faltan ${selectionSummary.missingForNext} número${selectionSummary.missingForNext === 1 ? "" : "s"} para completar la siguiente boleta.`}${fidelitySingleTicketOnly ? " En fidelizacion solo se permite una boleta por cliente." : ""}</span>
+          </div>
+        ` : ""}
         <div class="selector-summary-mobile-chips">
           ${selected.length
             ? selected
@@ -2671,19 +2731,15 @@ function renderRaffleSelectorContent() {
               autocomplete="off"
             />
           </label>
-          <div class="selector-toolbar-actions">
-            <div class="selector-toolbar-note">${escapeHtml(limitInfo)}</div>
-            <button type="button" class="button secondary selector-refresh" data-action="refresh-raffle-selector">Actualizar</button>
-          </div>
+          ${limitInfo ? `
+            <div class="selector-toolbar-actions">
+              <div class="selector-toolbar-note">${escapeHtml(limitInfo)}</div>
+            </div>
+          ` : ""}
         </div>
         ${notice}
-        ${liveSummary}
         <div class="selector-pagination selector-pagination-top">
           <button type="button" class="selector-page-button" data-selector-page="prev" ${pagination.hasPrev ? "" : "disabled"}>Anterior</button>
-          <div class="selector-pagination-current">
-            <span>${escapeHtml(pageInfo)}</span>
-            <strong>${escapeHtml(pageRange)}</strong>
-          </div>
           <button type="button" class="selector-page-button" data-selector-page="next" ${pagination.hasNext ? "" : "disabled"}>Siguiente</button>
         </div>
         </div>
@@ -2691,14 +2747,6 @@ function renderRaffleSelectorContent() {
           <div class="ticket-grid">
             ${numbersHtml}
           </div>
-        </div>
-        <div class="selector-pagination selector-pagination-bottom">
-          <button type="button" class="selector-page-button" data-selector-page="prev" ${pagination.hasPrev ? "" : "disabled"}>Anterior</button>
-          <div class="selector-pagination-current">
-            <span>${escapeHtml(pageInfo)}</span>
-            <strong>${escapeHtml(pageRange)}</strong>
-          </div>
-          <button type="button" class="selector-page-button" data-selector-page="next" ${pagination.hasNext ? "" : "disabled"}>Siguiente</button>
         </div>
       </div>
 
@@ -3155,7 +3203,13 @@ function renderPaymentModalContent() {
     ? (getRaffleDisplayDescription(raffle) || "Contin·a con tu pago con el método que prefieras.")
     : "Contin·a con tu pago con el método que prefieras.";
   const total = Number(paymentModalState.amount || getPaymentModalSelectionTotal(raffle, selected) || 0);
-  const pricingSummary = raffle ? formatRafflePricingSummary(raffle) : "";
+  const purchaseSummary = raffle?.quickPackage
+    ? `Paquete de ${raffle.quickPackage.quantity}`
+    : selectionSummary.isComplete
+      ? `Paquete de ${selectionSummary.completeTickets}`
+      : selected.length
+        ? "Selección pendiente de completar."
+        : "Aún no hay boletas seleccionadas.";
   const selectedChips = raffle?.quickPackage ? "" : selected.length
     ? selected
       .map((item) => `<span class="payment-chip">${escapeHtml(item)}</span>`)
@@ -3192,7 +3246,7 @@ function renderPaymentModalContent() {
   return `
       <div class="payment-modal-head">
         <div class="payment-modal-head-copy">
-          <h3>Completa tu compra</h3>
+          <h3 id="payment-modal-title">Carrito de compra</h3>
           <p>${escapeHtml(description)}</p>
         </div>
       <button type="button" class="selector-close" data-action="close-payment-modal">Cerrar</button>
@@ -3223,12 +3277,10 @@ function renderPaymentModalContent() {
               <p>Te faltan ${selectionSummary.missingForNext} número${selectionSummary.missingForNext === 1 ? "" : "s"} para completar una boleta de ${selectionSummary.groupSize} números.</p>
             </div>
           ` : ""}
-          ${pricingSummary ? `
-            <div class="payment-modal-pricing">
-              <span>Precio de boletería:</span>
-              <p>${escapeHtml(pricingSummary)}</p>
-            </div>
-          ` : ""}
+          <div class="payment-modal-pricing">
+            <span>Detalle de tu compra:</span>
+            <p>${escapeHtml(purchaseSummary)}</p>
+          </div>
           <div class="payment-modal-footnote">${escapeHtml(supportLabel)}</div>
         </div>
 
@@ -3237,7 +3289,6 @@ function renderPaymentModalContent() {
               <span class="payment-card-kicker">Instrucciones de pago</span>
               <span class="payment-card-badge">Lee antes de pagar</span>
             </div>
-            <div class="payment-action-icon payment-action-icon-note"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" style="width:1em;height:1em;display:block;"><path d="M7 4h7l3 3v13H7z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 4v4h4" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 11h6M9 14h6M9 17h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
             <div class="payment-card-copy">
               <strong>Así debes realizar tu pago</strong>
               <p>Esta información viene directamente de la configuraci·n del sorteo.</p>
@@ -3248,7 +3299,6 @@ function renderPaymentModalContent() {
 
       <div class="payment-modal-right">
           <div class="payment-action-card payment-contact-card">
-            <div class="payment-action-icon payment-action-icon-contact"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" style="width:1em;height:1em;display:block;"><path d="M20 18.5c-1.4-1.2-3.1-1.9-5-2.3l-1.1 2.2H10l-1.1-2.2c-1.9.4-3.6 1.1-5 2.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="9" r="3.2" stroke="currentColor" stroke-width="1.8"/><path d="M7.2 20a8.9 8.9 0 0 1 9.6 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
             <div class="payment-card-copy">
               <span class="payment-card-kicker">Datos del comprador</span>
               <strong>Completa tus datos</strong>
@@ -3271,14 +3321,16 @@ function renderPaymentModalContent() {
           </div>
 
           <div class="payment-action-card">
-            <div class="payment-action-icon payment-action-icon-upload"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" style="width:1em;height:1em;display:block;"><path d="M12 16V6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M8.5 9.5 12 6l3.5 3.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 14.5V18a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
             <div class="payment-card-copy">
               <span class="payment-card-kicker">${supportUploadMode ? "Captura de fidelizacion" : "Comprobante"}</span>
               <strong>${supportUploadMode ? "Sube tu captura" : "Sube tu soporte"}</strong>
               <p>${supportUploadMode ? "Sube una captura que demuestre que sigues la fan page. Este sorteo usa capturas en lugar de comprobantes de pago." : "Sube una imagen de tu comprobante para enviarlo a revisión."}</p>
             </div>
             <input type="file" accept="image/*" data-public-receipt-input hidden />
-            <button type="button" class="button secondary" data-action="trigger-public-receipt-upload" ${isDisabled ? "disabled" : ""}>${supportUploadMode ? "Cargar captura" : "Cargar comprobante"}</button>
+            <button type="button" class="button secondary" data-action="trigger-public-receipt-upload" ${isDisabled ? "disabled" : ""}>
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false" style="width:1.2em;height:1.2em;display:block;flex-shrink:0;"><path d="M12 16V6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M8.5 9.5 12 6l3.5 3.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 14.5V18a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span>${supportUploadMode ? "Cargar captura" : "Cargar comprobante"}</span>
+            </button>
             ${receiptLabel}
           </div>
 
@@ -3303,6 +3355,7 @@ function renderPaymentModal() {
       id="payment-modal"
       class="payment-modal"
       role="dialog"
+      aria-labelledby="payment-modal-title"
       aria-modal="true"
       aria-hidden="true"
     >
@@ -3391,9 +3444,21 @@ function syncRaffleSelectorModal() {
 function paintRaffleSelector() {
   const content = document.getElementById("raffle-selector-content");
   if (!content) return;
+  const activeInput = document.activeElement;
+  const restoreSearchFocus = content.contains(activeInput)
+    && activeInput?.matches?.("[data-selector-search]");
+  const selectionStart = restoreSearchFocus ? activeInput.selectionStart : null;
+  const selectionEnd = restoreSearchFocus ? activeInput.selectionEnd : null;
   content.innerHTML = renderRaffleSelectorContent();
   bindRaffleSelectorActions(content);
   syncRaffleSelectorModal();
+  if (restoreSearchFocus) {
+    const searchInput = content.querySelector("[data-selector-search]");
+    searchInput?.focus({ preventScroll: true });
+    if (searchInput && selectionStart !== null && selectionEnd !== null) {
+      searchInput.setSelectionRange(selectionStart, selectionEnd);
+    }
+  }
 }
 
 function handleRaffleSelectorTicketValue(rawValue) {
@@ -3555,20 +3620,23 @@ async function fetchRaffleSelectorNumbers({ silent = false } = {}) {
   }
 
   const requestId = ++raffleSelectorState.requestId;
+  const requestedPage = raffleSelectorState.page || 1;
+  const requestedQuery = raffleSelectorState.query || "";
   raffleSelectorState.loading = !silent;
   raffleSelectorState.error = "";
   if (!silent) {
     raffleSelectorState.notice = "Cargando numeros disponibles...";
     raffleSelectorState.noticeTone = "info";
+    paintRaffleSelector();
   }
-  paintRaffleSelector();
 
   try {
     const searchParams = new URLSearchParams();
-    searchParams.set("limit", String(RAFFLE_SELECTOR_LIMIT));
-    searchParams.set("page", String(raffleSelectorState.page || 1));
-    if (raffleSelectorState.query) {
-      searchParams.set("query", raffleSelectorState.query);
+    searchParams.set("limit", String(raffleSelectorState.quickPackageQuantity ? RAFFLE_SELECTOR_LIMIT : RAFFLE_SELECTOR_PAGE_SIZE));
+    searchParams.set("page", String(requestedPage));
+    searchParams.set("selector", "1");
+    if (requestedQuery) {
+      searchParams.set("query", requestedQuery);
     }
 
     const response = await fetch(
@@ -3581,7 +3649,9 @@ async function fetchRaffleSelectorNumbers({ silent = false } = {}) {
     }
 
     const payload = await response.json();
-    if (requestId !== raffleSelectorState.requestId) {
+    if (requestId !== raffleSelectorState.requestId
+      || requestedPage !== (raffleSelectorState.page || 1)
+      || requestedQuery !== (raffleSelectorState.query || "")) {
       return;
     }
 
@@ -3638,7 +3708,9 @@ async function fetchRaffleSelectorNumbers({ silent = false } = {}) {
     }
     paintRaffleSelector();
   } catch (error) {
-    if (requestId !== raffleSelectorState.requestId) {
+    if (requestId !== raffleSelectorState.requestId
+      || requestedPage !== (raffleSelectorState.page || 1)
+      || requestedQuery !== (raffleSelectorState.query || "")) {
       return;
     }
     raffleSelectorState.loading = false;
@@ -5838,8 +5910,9 @@ function renderShell(site, slug) {
         <section class="hero hero-banner-only" id="inicio">
           <div class="shell hero-card">
             <div class="hero-grid">
-                <div class="hero-media hero-media-with-footer">
+                <div class="hero-media hero-media-with-footer"${featuredRaffle && !heroVideo ? ` data-raffle-gallery="${escapeAttr(String(featuredRaffle?.campaign?.id || ""))}"` : ""}>
                 ${heroVideo ? renderInlineVideo(heroVideo, heroTitle) : `<img ${heroSpotlightMediaAttribute} src="${escapeHtml(heroSpotlightImage)}" alt="${escapeHtml(heroSpotlightTitle)}" loading="eager" fetchpriority="high" decoding="async" />`}
+                ${featuredRaffle && !heroVideo ? renderRaffleImageNavigation(featuredRaffle, site) : ""}
                 ${featuredRaffle ? `
                   <div class="overlay hero-media-footer">
                     <div class="overlay-top">
@@ -6037,6 +6110,14 @@ async function refreshFeaturedRaffleAdvance(site, slug) {
 }
 
 app.addEventListener("click", (event) => {
+  const raffleImageButton = event.target.closest("[data-raffle-image-step]");
+  if (raffleImageButton && app.contains(raffleImageButton)) {
+    event.preventDefault();
+    event.stopPropagation();
+    changeRaffleImage(raffleImageButton);
+    return;
+  }
+
   const startPurchaseButton = event.target.closest('[data-action="start-public-chat-purchase"]');
   if (startPurchaseButton && app.contains(startPurchaseButton)) {
     event.preventDefault();
