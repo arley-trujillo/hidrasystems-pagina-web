@@ -34,7 +34,10 @@ async function fetchPublicSitePayload(slug) {
     await waitForPublicSiteRetry(PUBLIC_SITE_RETRY_DELAYS_MS[attempt] || 0);
 
     try {
-      const query = new URLSearchParams({ deferMedia: "1" });
+      // La portada es parte esencial de la tarjeta principal. Cargarla desde la
+      // primera respuesta evita mostrar una imagen de plantilla y reemplazarla
+      // segundos después por la portada real del sorteo.
+      const query = new URLSearchParams();
       if (attempt > 0) {
         query.set("retry", String(attempt));
       }
@@ -500,13 +503,15 @@ function getRafflePricingPackages(raffle = {}) {
 }
 
 function shouldShowQuickPackages(raffle = {}) {
-  const config = raffle?.publicConfig || raffle?.public_config || {};
-  return Boolean(config.showQuickPackages ?? config.show_quick_packages);
+  // La modalidad comercial del sorteo es la fuente de verdad. Si ya existen
+  // paquetes vÃ¡lidos, deben estar disponibles en su vitrina pÃºblica sin una
+  // segunda activaciÃ³n que pueda ocultarlos por error.
+  return getRafflePricingStrategy(raffle) === "paquetes"
+    && getRafflePricingPackages(raffle).some((item) => item.quantity > 0 && item.value > 0);
 }
 
 function renderQuickPackageActions(raffle = {}) {
   if (!shouldShowQuickPackages(raffle)) return "";
-  if (getRafflePricingStrategy(raffle) !== "paquetes") return "";
   const groupSize = getRaffleSelectorCombinationSize(raffle);
   const supportUploadMode = Boolean(raffle?.campaign?.ticket_auto_config?.public_support_upload);
   const packages = getRafflePricingPackages(raffle)
