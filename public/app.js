@@ -224,6 +224,7 @@ const raffleSelectorState = {
   requestId: 0,
   pollTimer: null,
   queryTimer: null,
+  quickPackageQuantity: 0,
 };
 
 const paymentModalState = {
@@ -496,6 +497,38 @@ function getRafflePricingPackages(raffle = {}) {
     })
     .filter(Boolean)
     .sort((a, b) => a.quantity - b.quantity);
+}
+
+function shouldShowQuickPackages(raffle = {}) {
+  const config = raffle?.publicConfig || raffle?.public_config || {};
+  return Boolean(config.showQuickPackages ?? config.show_quick_packages);
+}
+
+function renderQuickPackageActions(raffle = {}) {
+  if (!shouldShowQuickPackages(raffle)) return "";
+  if (getRafflePricingStrategy(raffle) !== "paquetes") return "";
+  const groupSize = getRaffleSelectorCombinationSize(raffle);
+  const supportUploadMode = Boolean(raffle?.campaign?.ticket_auto_config?.public_support_upload);
+  const packages = getRafflePricingPackages(raffle)
+    .filter((item) => item.quantity * groupSize <= RAFFLE_SELECTOR_LIMIT)
+    .filter((item) => !supportUploadMode || item.quantity === 1)
+    .slice(0, 4);
+  if (!packages.length) return "";
+
+  const raffleId = escapeAttr(String(raffle?.campaign?.id || ""));
+  return `
+    <div class="quick-package-actions" aria-label="Compra rápida por paquetes">
+      <span class="quick-package-label">Compra rápida · números al azar</span>
+      <div class="quick-package-list">
+        ${packages.map((item) => `
+          <button type="button" class="quick-package-button" data-raffle-package="${escapeAttr(String(item.quantity))}" data-raffle-id="${raffleId}">
+            <strong>${escapeHtml(`${item.quantity} boleta${item.quantity === 1 ? "" : "s"}`)}</strong>
+            <span>${escapeHtml(currencyFormatter.format(item.value))}</span>
+          </button>
+        `).join("")}
+      </div>
+    </div>
+  `;
 }
 
 function getRafflePriceForQuantity(raffle = {}, quantity = 1) {
@@ -1979,6 +2012,7 @@ function renderRaffles(site) {
             ${description ? `<p class="raffle-feature-copy">${escapeHtml(description)}</p>` : ""}
             ${renderRaffleAdvanceBlock({ campaign, publicConfig })}
             <div class="raffle-feature-actions">
+              ${renderQuickPackageActions({ campaign, publicConfig })}
               <button
                 type="button"
                 class="button gold js-open-raffle-selector"
@@ -2016,6 +2050,7 @@ function renderRaffles(site) {
           </div>
           ${renderRaffleAdvanceBlock({ campaign, publicConfig }, { compact: true })}
           <div class="raffle-card-actions">
+            ${renderQuickPackageActions({ campaign, publicConfig })}
             <button
               type="button"
               class="button gold js-open-raffle-selector"
@@ -2059,6 +2094,7 @@ function renderRaffles(site) {
           ${pricingSummary ? `<p class="raffle-price-summary">${escapeHtml(pricingSummary)}</p>` : ""}
           ${renderRaffleAdvanceBlock({ campaign, publicConfig })}
           <div class="raffle-carousel-card-actions">
+            ${renderQuickPackageActions({ campaign, publicConfig })}
             <button
               type="button"
               class="button gold js-open-raffle-selector"
@@ -3287,6 +3323,35 @@ function clearRaffleSelectorTimers() {
   }
 }
 
+function applyQuickPackageSelection() {
+  const quantity = Number(raffleSelectorState.quickPackageQuantity || 0);
+  const raffle = raffleSelectorState.raffle || null;
+  if (!quantity || !raffle) return;
+
+  raffleSelectorState.quickPackageQuantity = 0;
+  const groupSize = getRaffleSelectorCombinationSize(raffle);
+  const requiredNumbers = quantity * groupSize;
+  const available = asArray(raffleSelectorState.numbers)
+    .map((ticket) => String(ticket?.display || ticket?.number || "").trim())
+    .filter(Boolean);
+
+  if (available.length < requiredNumbers) {
+    raffleSelectorState.notice = "No hay suficientes números disponibles para ese paquete. Puedes escoger otro paquete o elegir tus números manualmente.";
+    raffleSelectorState.noticeTone = "warning";
+    return;
+  }
+
+  for (let index = available.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1));
+    [available[index], available[randomIndex]] = [available[randomIndex], available[index]];
+  }
+
+  raffleSelectorState.selected = available.slice(0, requiredNumbers);
+  persistSelection(raffle.campaign?.id, raffleSelectorState.selected);
+  raffleSelectorState.notice = `Elegimos ${quantity} boleta${quantity === 1 ? "" : "s"} con números disponibles al azar. Puedes continuar al pago o cambiar cualquier número.`;
+  raffleSelectorState.noticeTone = "success";
+}
+
 async function fetchRaffleSelectorNumbers({ silent = false } = {}) {
   const site = raffleSelectorState.site || {};
   const slug = raffleSelectorState.slug || "";
@@ -3362,10 +3427,14 @@ async function fetchRaffleSelectorNumbers({ silent = false } = {}) {
     raffleSelectorState.updatedAt = payload?.updatedAt || new Date().toISOString();
     raffleSelectorState.loading = false;
     raffleSelectorState.error = "";
-    raffleSelectorState.notice = raffleSelectorState.query
-      ? `Resultados actualizados para "${raffleSelectorState.query}".`
-      : "Numeros actualizados en tiempo real.";
-    raffleSelectorState.noticeTone = "success";
+    if (raffleSelectorState.quickPackageQuantity) {
+      applyQuickPackageSelection();
+    } else {
+      raffleSelectorState.notice = raffleSelectorState.query
+        ? `Resultados actualizados para "${raffleSelectorState.query}".`
+        : "Numeros actualizados en tiempo real.";
+      raffleSelectorState.noticeTone = "success";
+    }
     paintRaffleSelector();
   } catch (error) {
     if (requestId !== raffleSelectorState.requestId) {
@@ -3380,11 +3449,12 @@ async function fetchRaffleSelectorNumbers({ silent = false } = {}) {
   }
 }
 
-async function openRaffleSelector(raffleId) {
+async function openRaffleSelector(raffleId, quickPackageQuantity = 0) {
   const fallbackSite = raffleSelectorState.site || window.__PUBLIC_SITE_STATE__?.site || null;
   const fallbackSlug = window.__PUBLIC_SITE_STATE__?.slug || raffleSelectorState.slug || getSlugFromLocation();
   const site = fallbackSite || window.__PUBLIC_SITE_STATE__?.site || null;
   const requestedId = String(raffleId || "");
+  const requestedPackageQuantity = Math.max(0, Number.parseInt(quickPackageQuantity, 10) || 0);
   const previousRaffleId = String(raffleSelectorState.raffle?.campaign?.id || "");
   const initialRaffles = asArray(site?.activeRaffles);
   const raffle =
@@ -3422,6 +3492,7 @@ async function openRaffleSelector(raffleId) {
     raffleSelectorState.notice = "Cargando numeros disponibles...";
     raffleSelectorState.noticeTone = "info";
     raffleSelectorState.updatedAt = "";
+    raffleSelectorState.quickPackageQuantity = requestedPackageQuantity;
     raffleSelectorState.open = true;
 
     window.__PUBLIC_SITE_STATE__ = {
@@ -3461,6 +3532,7 @@ async function openRaffleSelector(raffleId) {
   raffleSelectorState.notice = "Cargando numeros disponibles...";
   raffleSelectorState.noticeTone = "info";
   raffleSelectorState.updatedAt = "";
+  raffleSelectorState.quickPackageQuantity = requestedPackageQuantity;
   raffleSelectorState.open = true;
 
   window.__PUBLIC_SITE_STATE__ = {
@@ -3493,6 +3565,7 @@ function closeRaffleSelector() {
   raffleSelectorState.notice = "";
   raffleSelectorState.noticeTone = "info";
   raffleSelectorState.updatedAt = "";
+  raffleSelectorState.quickPackageQuantity = 0;
   raffleSelectorState.requestId += 1;
   raffleSelectorState.retryCount = 0;
   clearRaffleSelectorTimers();
@@ -5938,6 +6011,16 @@ app.addEventListener("click", (event) => {
     }
   }
 
+  const packageButton = event.target.closest("[data-raffle-package][data-raffle-id]");
+  if (packageButton && app.contains(packageButton)) {
+    event.preventDefault();
+    openRaffleSelector(
+      packageButton.getAttribute("data-raffle-id") || "",
+      packageButton.getAttribute("data-raffle-package") || "0",
+    );
+    return;
+  }
+
   const openButton = event.target.closest("[data-raffle-id].js-open-raffle-selector");
   if (openButton && app.contains(openButton)) {
     event.preventDefault();
@@ -6595,6 +6678,13 @@ app.addEventListener("input", (event) => {
   updatePaymentModalField(field.getAttribute("data-payment-field"), field.value);
 });
 
+function openRecommendedRetailProduct(products, search = window.location.search) {
+  const id = new URLSearchParams(search).get('hidra_product');
+  if (!/^\d+$/.test(id || '')) return;
+  const product = (Array.isArray(products) ? products : []).find(item => String(item.id) === id);
+  if (product) openRetailProductModal(product);
+}
+
 async function loadRetailSite() {
   const slug = getSlugFromLocation();
 
@@ -6642,6 +6732,7 @@ async function loadRetailSite() {
 
     const payload = await response.json();
     renderRetailShell(payload, slug);
+    openRecommendedRetailProduct(payload.products);
   } catch (error) {
     if (!cached?.site) {
       renderRetailShell({

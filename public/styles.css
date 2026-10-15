@@ -956,6 +956,45 @@ button {
   padding-top: 2px;
 }
 
+.quick-package-actions {
+  display: grid;
+  gap: 7px;
+  width: min(100%, 470px);
+  margin: 0 0 10px;
+}
+
+.quick-package-label {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.quick-package-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.quick-package-button {
+  display: grid;
+  gap: 2px;
+  min-width: 96px;
+  padding: 9px 11px;
+  border: 1px solid rgba(214, 161, 30, .42);
+  border-radius: 12px;
+  background: #fffdf5;
+  color: #0b2340;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.quick-package-button strong { font-size: 12px; }
+.quick-package-button span { color: #9a6700; font-size: 12px; font-weight: 800; }
+.quick-package-button:hover { border-color: #d79f22; background: #fff7d8; transform: translateY(-1px); }
+
 .raffle-carousel-slide.is-active {
   opacity: 1;
   transform: translateX(0) scale(1);
@@ -1430,6 +1469,8 @@ button {
   width: fit-content;
   padding-top: 2px;
 }
+
+.raffle-feature-actions .quick-package-actions { justify-self: end; }
 
 .raffle-feature .button.gold {
   width: fit-content;
@@ -5109,6 +5150,8 @@ button {
     margin-top: 2px;
     justify-self: start;
   }
+
+  .raffle-feature-actions .quick-package-actions { justify-self: start; }
 
   .raffle-progress {
     padding: 12px 14px;
