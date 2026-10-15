@@ -5730,15 +5730,10 @@ function renderShell(site, slug) {
   const activeRaffles = asArray(site.activeRaffles);
   const featuredRaffle = activeRaffles[0] || null;
   const heroSpotlightTitle = featuredRaffle ? getRaffleDisplayTitle(featuredRaffle) : heroTitle;
-  const heroSpotlightDescription = featuredRaffle
-    ? (getRaffleDisplayDescription(featuredRaffle) || "Compra segura y numeros visibles en tiempo real.")
-    : (settings.heroOverlayText || "Compra segura y numeros visibles en tiempo real.");
   const heroSpotlightImage = featuredRaffle ? getRaffleDisplayImage(featuredRaffle, site) : heroImage;
   const heroSpotlightMediaAttribute = featuredRaffle
     ? `data-public-raffle-image="${escapeAttr(String(featuredRaffle?.campaign?.id || ""))}"`
     : "data-public-hero-image";
-  const heroSpotlightLabel = featuredRaffle ? "Sorteo destacado" : "Compra segura";
-  const heroSpotlightLabelClass = featuredRaffle ? "overlay-label overlay-label-featured" : "overlay-label";
   const heroGreeting = "";
   const heroActionButtons = `
               <div class="hero-actions">
@@ -5756,7 +5751,6 @@ function renderShell(site, slug) {
   const visitCount = Number(site?.settings?.visitCount || site?.stats?.visitCount || 0);
   const heroSpotlightChips = [
     featuredRaffle ? getRaffleDisplayDate(featuredRaffle) : "",
-    featuredRaffle ? getRaffleDisplayPrice(featuredRaffle) : "",
   ].filter(Boolean);
   const raffleCount = asArray(site.activeRaffles).length;
   const faqCount = asArray(site.faq).length;
@@ -5834,18 +5828,18 @@ function renderShell(site, slug) {
                   <div class="overlay hero-media-footer">
                     <div class="overlay-top">
                       <div class="overlay-copy">
-                        <span class="${escapeHtml(heroSpotlightLabelClass)}">${escapeHtml(heroSpotlightLabel)}</span>
                         <strong>${escapeHtml(heroSpotlightTitle)}</strong>
-                        <div class="overlay-description">${escapeHtml(heroSpotlightDescription)}</div>
                         ${heroSpotlightChips.length ? `
                           <div class="overlay-meta">
                             ${heroSpotlightChips.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
                           </div>
                         ` : ""}
                       </div>
-                      ${heroActionButtons}
+                      <div class="hero-purchase-actions">
+                        ${renderRaffleAdvanceBlock(featuredRaffle)}
+                        ${heroActionButtons}
+                      </div>
                     </div>
-                    ${renderRaffleAdvanceBlock(featuredRaffle)}
                   </div>
                 ` : `<div class="overlay hero-media-footer">${heroActionButtons}</div>`}
               </div>
