@@ -2805,6 +2805,22 @@ function prefetchQuickPackages(site, slug) {
   });
 }
 
+function openHeroRafflePurchase(raffleId) {
+  const raffle = asArray(window.__PUBLIC_SITE_STATE__?.site?.activeRaffles)
+    .find(item => String(item.campaign?.id) === String(raffleId));
+  const packageButton = shouldShowQuickPackages(raffle)
+    ? app.querySelector(`#sorteos [data-raffle-package][data-raffle-id="${CSS.escape(String(raffleId))}"]`)
+    : null;
+  const packagePanel = packageButton?.closest(".quick-package-actions");
+  if (!packagePanel) return openRaffleSelector(raffleId);
+
+  // Mostrar los paquetes del mismo sorteo sin abrir el selector ni elegir uno.
+  const headerHeight = app.querySelector(".topbar")?.getBoundingClientRect().height || 0;
+  packagePanel.style.scrollMarginTop = `${Math.ceil(headerHeight) + 16}px`;
+  packagePanel.scrollIntoView({ behavior: "instant", block: "start" });
+  packageButton.focus({ preventScroll: true });
+}
+
 async function openQuickPackagePayment(raffleId, quantity, retry = false) {
   const site = window.__PUBLIC_SITE_STATE__?.site;
   const slug = window.__PUBLIC_SITE_STATE__?.slug;
@@ -5740,7 +5756,7 @@ function renderShell(site, slug) {
                 ${featuredRaffle ? `
                   <button
                     type="button"
-                    class="button gold js-open-raffle-selector hero-buy-button"
+                    class="button gold js-start-hero-purchase hero-buy-button"
                     data-raffle-id="${escapeHtml(String(featuredRaffle?.campaign?.id || ""))}"
                   >Comprar</button>
                 ` : ""}
@@ -6163,6 +6179,13 @@ app.addEventListener("click", (event) => {
       packageButton.getAttribute("data-raffle-id") || "",
       packageButton.getAttribute("data-raffle-package") || "0",
     );
+    return;
+  }
+
+  const heroBuyButton = event.target.closest("[data-raffle-id].js-start-hero-purchase");
+  if (heroBuyButton && app.contains(heroBuyButton)) {
+    event.preventDefault();
+    openHeroRafflePurchase(heroBuyButton.getAttribute("data-raffle-id") || "");
     return;
   }
 
