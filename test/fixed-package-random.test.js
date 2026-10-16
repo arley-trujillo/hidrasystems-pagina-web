@@ -88,17 +88,27 @@ for (const cached of [true, false]) {
   });
 }
 
-test("20 boletas con 10 números conserva los 200 números y grupos aleatorios del servidor, sin cambiar precio ni cobrar", async () => {
-  const { ctx, raffle, payment, calls, resolve } = setup({ groupSize: 10 });
-  const groups = Array.from({ length: 20 }, (_, i) => Array.from({ length: 10 }, (_, j) => String(i * 10 + j).padStart(4, "0")));
+test("30 números reserva tres grupos de diez del servidor, sin multiplicar números ni cambiar precio", async () => {
+  const { ctx, raffle, payment, calls, resolve } = setup({ quantity:30, groupSize: 10 });
+  const groups = Array.from({ length: 3 }, (_, i) => Array.from({ length: 10 }, (_, j) => String(i * 10 + j).padStart(4, "0")));
   resolve({ randomPackage: true, numbers: groups.map(numbers => ({ numbers })) });
-  assert.match(ctx.renderQuickPackageActions(raffle), /data-raffle-package="20"/);
-  assert.equal(await ctx.openQuickPackagePayment(7, 20), true);
-  assert.deepEqual(calls.availability, [["prueba", 7, 20]]);
+  assert.match(ctx.renderQuickPackageActions(raffle), /data-raffle-package="30"/);
+  assert.equal(await ctx.openQuickPackagePayment(7, 30), true);
+  assert.deepEqual(calls.availability, [["prueba", 7, 30]]);
   assert.deepEqual(Array.from(payment.selected), groups.flat());
   assert.equal(payment.amount, 40000);
-  assert.equal(ctx.getRaffleSelectorSelectionSummary(payment.raffle, payment.selected).completeTickets, 20);
+  assert.equal(payment.selected.length,30);
+  assert.equal(ctx.getRaffleSelectorSelectionSummary(payment.raffle, payment.selected).completeTickets, 3);
   assert.equal(payment.customerName, "Cliente");
+});
+
+test('el paquete de treinta números rechaza la respuesta antigua de treinta boletas y conserva el precio',async()=>{
+  const {ctx,payment,resolve}=setup({quantity:30,groupSize:10});
+  const groups=Array.from({length:30},(_,i)=>Array.from({length:10},(_,j)=>String(i*10+j).padStart(5,'0')));
+  resolve({randomPackage:true,numbers:groups.map(numbers=>({numbers}))});
+  assert.equal(await ctx.openQuickPackagePayment(7,30),false);
+  assert.equal(payment.selected.length,0);
+  assert.match(payment.error,/No hay suficientes/);
 });
 
 for (const [name, payload] of [

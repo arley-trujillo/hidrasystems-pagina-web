@@ -593,8 +593,9 @@ function getRafflePricingPackages(raffle = {}) {
 
 function getQuickPackageOptions(raffle = {}) {
   if (getRafflePricingStrategy(raffle) === "paquetes_fijos") {
+    const groupSize = getRaffleSelectorCombinationSize(raffle);
     return getRafflePricingPackages(raffle)
-      .filter(item => Number.isSafeInteger(item.quantity) && item.quantity > 1 && Number.isFinite(item.value) && item.value > 0)
+      .filter(item => Number.isSafeInteger(item.quantity) && item.quantity > 1 && item.quantity % groupSize === 0 && Number.isFinite(item.value) && item.value > 0)
       .map(item => ({ quantity: item.quantity, value: getRaffleFixedPackagePrice(raffle, item.quantity) }))
       .filter(item => item.value > 0);
   }
@@ -622,7 +623,7 @@ function renderQuickPackageActions(raffle = {}) {
   const supportUploadMode = Boolean(getRaffleSelectorAutoConfig(raffle).public_support_upload);
   const fixedPackages = getRafflePricingStrategy(raffle) === "paquetes_fijos";
   const packages = getQuickPackageOptions(raffle)
-    .filter((item) => fixedPackages ? item.quantity <= 500 : item.quantity * groupSize <= RAFFLE_SELECTOR_LIMIT)
+    .filter((item) => fixedPackages ? item.quantity / groupSize <= 500 : item.quantity * groupSize <= RAFFLE_SELECTOR_LIMIT)
     .filter((item) => !supportUploadMode || item.quantity === 1);
   if (!packages.length) return "";
 
@@ -636,7 +637,7 @@ function renderQuickPackageActions(raffle = {}) {
           <button type="button" class="quick-package-button" data-raffle-package="${escapeAttr(String(item.quantity))}" data-raffle-id="${raffleId}">
             <span class="quick-package-copy">
               <span class="quick-package-kicker">Comprar paquete</span>
-              <strong class="quick-package-offer">de ${escapeHtml(String(item.quantity))} <span class="quick-package-times">×</span> <span class="quick-package-price">${escapeHtml(currencyFormatter.format(item.value))}</span></strong>
+              <strong class="quick-package-offer">de ${escapeHtml(String(item.quantity))}${fixedPackages ? ' números' : ''} <span class="quick-package-times">×</span> <span class="quick-package-price">${escapeHtml(currencyFormatter.format(item.value))}</span></strong>
             </span>
             <span class="quick-package-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
           </button>
@@ -649,8 +650,9 @@ function renderQuickPackageActions(raffle = {}) {
 function getRaffleFixedPackagePrice(raffle = {}, quantity = 1) {
   const count = Number(quantity);
   if (!Number.isSafeInteger(count) || count < 1 || count > 10000) return null;
+  const groupSize = getRaffleSelectorCombinationSize(raffle);
   const packages = getRafflePricingPackages(raffle)
-    .filter(item => Number.isSafeInteger(item.quantity) && item.quantity > 1 && Number.isFinite(item.value) && item.value > 0);
+    .filter(item => Number.isSafeInteger(item.quantity) && item.quantity > 1 && item.quantity % groupSize === 0 && Number.isFinite(item.value) && item.value > 0);
 
   // This exact-combination calculator belongs only to the new fixed-package
   // mode. Historical pricing, including custom web offers, stays unchanged.
@@ -667,7 +669,11 @@ function getRaffleFixedPackagePrice(raffle = {}, quantity = 1) {
 }
 
 function getRafflePriceForQuantity(raffle = {}, quantity = 1) {
-  if (getRafflePricingStrategy(raffle) === "paquetes_fijos") return getRaffleFixedPackagePrice(raffle, quantity);
+  if (getRafflePricingStrategy(raffle) === "paquetes_fijos") {
+    const tickets = Number(quantity);
+    return Number.isSafeInteger(tickets) && tickets > 0
+      ? getRaffleFixedPackagePrice(raffle, tickets * getRaffleSelectorCombinationSize(raffle)) : null;
+  }
   if (raffle.quickPackage && Number(quantity) === raffle.quickPackage.quantity) {
     return raffle.quickPackage.value;
   }
@@ -722,7 +728,7 @@ function formatRafflePricingSummary(raffle = {}) {
   }
 
   return packages
-    .map((item) => `${item.quantity} boleta${item.quantity === 1 ? "" : "s"} = ${currencyFormatter.format(item.value)}`)
+    .map((item) => `${item.quantity} ${getRafflePricingStrategy(raffle) === "paquetes_fijos" ? `número${item.quantity === 1 ? "" : "s"}` : `boleta${item.quantity === 1 ? "" : "s"}`} = ${currencyFormatter.format(item.value)}`)
     .join(" | ");
 }
 
@@ -843,6 +849,12 @@ function getRaffleSelectorAutoConfig(raffle = {}) {
 
 function getRaffleSelectorCombinationSize(raffle = {}) {
   const autoConfig = getRaffleSelectorAutoConfig(raffle);
+  if (getRafflePricingStrategy(raffle) === "paquetes_fijos") {
+    const mode = autoConfig.ticketStructureMode ?? autoConfig.ticket_structure_mode ?? autoConfig.boletaType ?? autoConfig.boleta_type;
+    if (mode === 'lineal') return 1;
+    const count = Number(autoConfig.combinationsPerTicket ?? autoConfig.combinations_per_ticket ?? 1);
+    return Number.isSafeInteger(count) && count >= 1 && count <= 10 ? count : 0;
+  }
   const configured = Number(
     autoConfig.combinationsPerTicket
     || autoConfig.combinations_per_ticket
@@ -2956,11 +2968,12 @@ async function prepareQuickPackageNumbers(raffle, pack, slug, raffleId, requestI
       },
     };
     const groupSize = getRaffleSelectorCombinationSize(updatedRaffle);
-    const required = pack.quantity * groupSize;
+    const required = fixedPackages ? pack.quantity : pack.quantity * groupSize;
+    const requiredTickets = fixedPackages ? pack.quantity / groupSize : pack.quantity;
     const groups = fixedPackages ? asArray(payload?.numbers).map(ticket => asArray(ticket.numbers).map(normalizeTicketDisplayValue).filter(Boolean)) : [];
     const available = fixedPackages ? groups.flat() : [...new Set(asArray(payload?.numbers).map(formatTicketSelectionLabel).filter(Boolean))];
     if ((fixedPackages
-          ? !payload?.randomPackage || pack.quantity > 500 || groups.length !== pack.quantity || groups.some(group => group.length !== groupSize)
+          ? !payload?.randomPackage || !Number.isInteger(requiredTickets) || requiredTickets > 500 || groups.length !== requiredTickets || groups.some(group => group.length !== groupSize)
             || new Set(available).size !== available.length
           : required > RAFFLE_SELECTOR_LIMIT)
         || available.length < required
@@ -3257,7 +3270,7 @@ function renderPaymentModalContent() {
   const site = paymentModalState.site || {};
   const selected = asArray(paymentModalState.selected);
   const emptySelectionCopy = raffle?.quickPackage
-    ? `Paquete de ${raffle.quickPackage.quantity} boletas con números al azar.`
+    ? `Paquete de ${raffle.quickPackage.quantity} ${getRafflePricingStrategy(raffle) === "paquetes_fijos" ? 'números al azar' : 'boletas con números al azar'}.`
     : "Selecciona numeros antes de pagar.";
   const selectionSummary = getRaffleSelectorSelectionSummary(raffle, selected);
   const paymentInstructions = getPaymentInstructionsText(raffle, site);

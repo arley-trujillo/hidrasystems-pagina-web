@@ -84,8 +84,8 @@ test("precios anteriores conservan cálculo, fallback, paquetes y ofertas rápid
   assert.ok(ctx.getRaffleDisplayPrice(legacy));
 });
 
-test("cantidades de paquete son boletas físicas y no sus combinaciones internas", () => {
-  const raffle = packageRaffle([{ quantity: 2, price: 40000 }], { ticket_auto_config: { combinations_per_ticket: 3 } });
+test("cantidades de paquete son números distribuidos en boletas físicas completas", () => {
+  const raffle = packageRaffle([{ quantity: 6, price: 40000 }], { ticket_auto_config: { combinations_per_ticket: 3 } });
   const { ctx } = setup(raffle);
   const summary = ctx.getRaffleSelectorSelectionSummary(raffle, ["01", "02", "03", "04", "05", "06"]);
   assert.equal(summary.totalNumbers, 6);
@@ -93,6 +93,17 @@ test("cantidades de paquete son boletas físicas y no sus combinaciones internas
   assert.equal(summary.total, 40000);
   assert.equal(summary.hasValidPrice, true);
   assert.equal(ctx.getRaffleSelectorSelectionSummary(raffle, ["01", "02", "03"]).hasValidPrice, false);
+});
+
+test('un paquete antiguo inválido no abarata la combinación de paquetes enteros',()=>{
+  const raffle=packageRaffle([{quantity:15,price:1000},{quantity:30,price:15000}],{ticket_auto_config:{combinationsPerTicket:10}});
+  const {ctx}=setup(raffle);
+  assert.equal(ctx.getRafflePriceForQuantity(raffle,3),15000);
+  assert.equal(ctx.getRafflePriceForQuantity(raffle,6),30000);
+  assert.deepEqual(Array.from(ctx.getQuickPackageOptions(raffle),item=>item.quantity),[30]);
+  const invalid=packageRaffle([{quantity:15,price:1000}],{ticket_auto_config:{combinationsPerTicket:10}});
+  assert.equal(ctx.getRafflePriceForQuantity(invalid,3),null);
+  assert.equal(ctx.getQuickPackageOptions(invalid).length,0);
 });
 
 test("conserva paquetes rápidos web personalizados como oferta explícita separada", () => {
