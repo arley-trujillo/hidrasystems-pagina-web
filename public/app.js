@@ -540,6 +540,7 @@ function updateRaffleGalleryImage(gallery, raffle, site, index) {
 }
 
 function getRaffleDisplayPrice(raffle = {}) {
+  if (getRafflePricingStrategy(raffle) === "paquetes_fijos") return "";
   const pricingConfig = getRafflePricingConfig(raffle);
   const raw = pricingConfig?.precioUnitario
     ?? pricingConfig?.precio_unitario
@@ -591,6 +592,12 @@ function getRafflePricingPackages(raffle = {}) {
 }
 
 function getQuickPackageOptions(raffle = {}) {
+  if (getRafflePricingStrategy(raffle) === "paquetes_fijos") {
+    return getRafflePricingPackages(raffle)
+      .filter(item => Number.isSafeInteger(item.quantity) && item.quantity > 1 && Number.isFinite(item.value) && item.value > 0)
+      .map(item => ({ quantity: item.quantity, value: getRaffleFixedPackagePrice(raffle, item.quantity) }))
+      .filter(item => item.value > 0);
+  }
   const config = raffle?.publicConfig || raffle?.public_config || {};
   const custom = config.quickPackages ?? config.quick_packages;
   if (Array.isArray(custom)) {
@@ -604,7 +611,8 @@ function getQuickPackageOptions(raffle = {}) {
 
 function shouldShowQuickPackages(raffle = {}) {
   const config = raffle?.publicConfig || raffle?.public_config || {};
-  return (config.showQuickPackages ?? config.show_quick_packages) === true
+  return (getRafflePricingStrategy(raffle) === "paquetes_fijos"
+      || (config.showQuickPackages ?? config.show_quick_packages) === true)
     && getQuickPackageOptions(raffle).length > 0;
 }
 
@@ -612,8 +620,9 @@ function renderQuickPackageActions(raffle = {}) {
   if (!shouldShowQuickPackages(raffle)) return "";
   const groupSize = getRaffleSelectorCombinationSize(raffle);
   const supportUploadMode = Boolean(getRaffleSelectorAutoConfig(raffle).public_support_upload);
+  const fixedPackages = getRafflePricingStrategy(raffle) === "paquetes_fijos";
   const packages = getQuickPackageOptions(raffle)
-    .filter((item) => item.quantity * groupSize <= RAFFLE_SELECTOR_LIMIT)
+    .filter((item) => fixedPackages ? item.quantity <= 500 : item.quantity * groupSize <= RAFFLE_SELECTOR_LIMIT)
     .filter((item) => !supportUploadMode || item.quantity === 1);
   if (!packages.length) return "";
 
@@ -637,7 +646,28 @@ function renderQuickPackageActions(raffle = {}) {
   `;
 }
 
+function getRaffleFixedPackagePrice(raffle = {}, quantity = 1) {
+  const count = Number(quantity);
+  if (!Number.isSafeInteger(count) || count < 1 || count > 10000) return null;
+  const packages = getRafflePricingPackages(raffle)
+    .filter(item => Number.isSafeInteger(item.quantity) && item.quantity > 1 && Number.isFinite(item.value) && item.value > 0);
+
+  // This exact-combination calculator belongs only to the new fixed-package
+  // mode. Historical pricing, including custom web offers, stays unchanged.
+  const totals = Array(count + 1).fill(Infinity);
+  totals[0] = 0;
+  for (let size = 1; size <= count; size += 1) {
+    for (const item of packages) {
+      if (item.quantity <= size) {
+        totals[size] = Math.min(totals[size], totals[size - item.quantity] + Math.round(item.value * 100));
+      }
+    }
+  }
+  return Number.isFinite(totals[count]) && totals[count] > 0 ? totals[count] / 100 : null;
+}
+
 function getRafflePriceForQuantity(raffle = {}, quantity = 1) {
+  if (getRafflePricingStrategy(raffle) === "paquetes_fijos") return getRaffleFixedPackagePrice(raffle, quantity);
   if (raffle.quickPackage && Number(quantity) === raffle.quickPackage.quantity) {
     return raffle.quickPackage.value;
   }
@@ -681,11 +711,12 @@ function getRafflePriceForQuantity(raffle = {}, quantity = 1) {
 }
 
 function formatRafflePricingSummary(raffle = {}) {
-  if (raffle.quickPackage) {
+  if (raffle.quickPackage && getRafflePricingStrategy(raffle) !== "paquetes_fijos") {
     return `${raffle.quickPackage.quantity} boletas por ${currencyFormatter.format(raffle.quickPackage.value)}`;
   }
   const packages = getRafflePricingPackages(raffle);
   if (!packages.length) {
+    if (getRafflePricingStrategy(raffle) === "paquetes_fijos") return "Venta por paquetes completos. Precios pendientes de configurar.";
     const price = getRaffleDisplayPrice(raffle);
     return price ? `Precio por boleta ${price}` : "";
   }
@@ -834,7 +865,9 @@ function getRaffleSelectorSelectionSummary(raffle = {}, selected = []) {
   const remainder = groupSize > 0 ? totalNumbers % groupSize : totalNumbers;
   const isComplete = totalNumbers > 0 && remainder === 0;
   const missingForNext = isComplete ? 0 : (groupSize - remainder);
-  const total = completeTickets > 0 ? getRafflePriceForQuantity(raffle, completeTickets) : 0;
+  const quotedTotal = completeTickets > 0 ? getRafflePriceForQuantity(raffle, completeTickets) : 0;
+  const total = supportUploadMode && quotedTotal === null ? 0 : quotedTotal;
+  const hasValidPrice = completeTickets > 0 && Number.isFinite(total) && total > 0;
 
   return {
     groupSize,
@@ -845,6 +878,7 @@ function getRaffleSelectorSelectionSummary(raffle = {}, selected = []) {
     isComplete,
     missingForNext,
     total,
+    hasValidPrice,
   };
 }
 
@@ -2146,13 +2180,13 @@ function renderRaffles(site) {
             ${renderRaffleAdvanceBlock({ campaign, publicConfig })}
             <div class="raffle-feature-actions">
               ${renderQuickPackageActions({ campaign, publicConfig })}
-              <button
+              ${getRafflePricingStrategy({ campaign }) !== "paquetes_fijos" ? `<button
                 type="button"
                 class="button gold js-open-raffle-selector"
                 data-raffle-id="${escapeAttr(String(campaign?.id || ""))}"
               >
                 Escoger mis números
-              </button>
+              </button>` : ""}
             </div>
           </div>
         </article>
@@ -2181,13 +2215,13 @@ function renderRaffles(site) {
           ${renderRaffleAdvanceBlock({ campaign, publicConfig }, { compact: true })}
           <div class="raffle-card-actions">
             ${renderQuickPackageActions({ campaign, publicConfig })}
-            <button
+            ${getRafflePricingStrategy({ campaign }) !== "paquetes_fijos" ? `<button
               type="button"
               class="button gold js-open-raffle-selector"
               data-raffle-id="${escapeAttr(String(campaign?.id || ""))}"
             >
               Escoger mis números
-            </button>
+            </button>` : ""}
           </div>
         </div>
       </article>
@@ -2226,13 +2260,13 @@ function renderRaffles(site) {
           ${renderRaffleAdvanceBlock({ campaign, publicConfig })}
           <div class="raffle-carousel-card-actions">
             ${renderQuickPackageActions({ campaign, publicConfig })}
-            <button
+            ${getRafflePricingStrategy({ campaign }) !== "paquetes_fijos" ? `<button
               type="button"
               class="button gold js-open-raffle-selector"
               data-raffle-id="${escapeAttr(String(campaign?.id || ""))}"
             >
               Escoger mis números
-            </button>
+            </button>` : ""}
           </div>
         </div>
       </article>
@@ -2565,6 +2599,16 @@ function formatRelativeTime(value) {
 
 function renderRaffleSelectorContent() {
   const raffle = raffleSelectorState.raffle || null;
+  if (getRafflePricingStrategy(raffle || {}) === "paquetes_fijos") {
+    return `
+      <div class="selector-summary">
+        <button type="button" class="button secondary" data-action="close-raffle-selector">Cerrar</button>
+        <h3>${escapeHtml(getRaffleDisplayTitle(raffle))}</h3>
+        <p>Compra paquetes completos. Los números disponibles se asignan al azar, sin escogerlos uno por uno.</p>
+        ${renderQuickPackageActions(raffle) || '<p class="selector-empty">No hay paquetes disponibles para comprar en este momento.</p>'}
+      </div>
+    `;
+  }
   const site = raffleSelectorState.site || {};
   const title = raffle ? getRaffleDisplayTitle(raffle) : "Selecciona un sorteo";
   const description = raffle ? getRaffleDisplayDescription(raffle) : "";
@@ -2631,8 +2675,10 @@ function renderRaffleSelectorContent() {
   const canContinueToPayment = Boolean(
     selected.length
     && selectionSummary.isComplete
+    && (selectionSummary.total !== null || fidelitySingleTicketOnly)
     && (!fidelitySingleTicketOnly || selectionSummary.completeTickets === 1),
   );
+  const priceLabel = selectedAmount === null ? "Cantidad sin paquete configurado" : formatCOP(selectedAmount);
   const limitInfo = raffleSelectorState.query ? `Resultados para "${escapeHtml(raffleSelectorState.query)}"` : "";
   const notice = raffleSelectorState.notice
     ? `<div class="selector-notice selector-notice-${escapeHtml(raffleSelectorState.noticeTone || "info")}">${escapeHtml(raffleSelectorState.notice)}</div>`
@@ -2690,7 +2736,7 @@ function renderRaffleSelectorContent() {
         ${selected.length ? `
           <div class="selector-summary-mobile-copy">
             <strong>${selectionSummary.completeTickets} boleta${selectionSummary.completeTickets === 1 ? "" : "s"} completa${selectionSummary.completeTickets === 1 ? "" : "s"}</strong>
-            <span class="selector-summary-mobile-total">Total: ${escapeHtml(formatCOP(selectedAmount))}</span>
+            <span class="selector-summary-mobile-total">Total: ${escapeHtml(priceLabel)}</span>
             <span>Cada boleta se arma con ${selectionSummary.groupSize} número${selectionSummary.groupSize === 1 ? "" : "s"}.${selectionSummary.isComplete ? "" : ` Te faltan ${selectionSummary.missingForNext} número${selectionSummary.missingForNext === 1 ? "" : "s"} para completar la siguiente boleta.`}${fidelitySingleTicketOnly ? " En fidelizacion solo se permite una boleta por cliente." : ""}</span>
           </div>
         ` : ""}
@@ -2753,7 +2799,7 @@ function renderRaffleSelectorContent() {
       <aside class="selector-summary">
       <div class="selector-summary-head">
           <h4>${selected.length ? `${selectionSummary.completeTickets} boleta${selectionSummary.completeTickets === 1 ? "" : "s"} completas` : "Aun no seleccionas numeros"}</h4>
-          ${selected.length ? `<p class="selector-summary-total">${escapeHtml(formatCOP(selectedAmount))}</p>` : ""}
+          ${selected.length ? `<p class="selector-summary-total">${escapeHtml(priceLabel)}</p>` : ""}
         </div>
         <div class="selected-list">
           ${selectedCopy}
@@ -2774,7 +2820,7 @@ function renderRaffleSelectorContent() {
     <div class="selector-summary-mobile">
       <div class="selector-summary-mobile-copy">
         <strong>${selected.length ? `${selected.length} numero${selected.length === 1 ? "" : "s"} elegidos` : "Sin numeros aun"}</strong>
-        ${selected.length ? `<span class="selector-summary-mobile-total">${escapeHtml(formatCOP(selectedAmount))}</span>` : ""}
+        ${selected.length ? `<span class="selector-summary-mobile-total">${escapeHtml(priceLabel)}</span>` : ""}
         <span>${selected.length ? buildSelectionMessage(raffle, selected) : "Toca un numero para empezar."}</span>
       </div>
       <div class="selector-summary-mobile-chips">
@@ -2819,8 +2865,8 @@ function getPaymentModalSelectionTotal(raffle = {}, selected = []) {
   return summary.total;
 }
 
-function loadQuickPackageAvailability(slug, raffleId) {
-  const key = `${slug}:${raffleId}`;
+function loadQuickPackageAvailability(slug, raffleId, packageQuantity = 0) {
+  const key = `${slug}:${raffleId}${packageQuantity ? `:${packageQuantity}` : ""}`;
   const existing = publicQuickAvailability.get(key);
   if (existing && existing.expiresAt > Date.now()) return existing.promise;
   const entry = { expiresAt: Date.now() + 15000 };
@@ -2829,7 +2875,7 @@ function loadQuickPackageAvailability(slug, raffleId) {
     const timeout = window.setTimeout(() => controller.abort(), 15000);
     try {
       const response = await fetch(
-        `${API_BASE_URL}/public-site/${encodeURIComponent(slug)}/raffles/${encodeURIComponent(raffleId)}/availability?limit=${RAFFLE_SELECTOR_LIMIT}&quick=1`,
+        `${API_BASE_URL}/public-site/${encodeURIComponent(slug)}/raffles/${encodeURIComponent(raffleId)}/availability?limit=${RAFFLE_SELECTOR_LIMIT}&quick=1${packageQuantity ? `&package_quantity=${encodeURIComponent(packageQuantity)}` : ""}`,
         { cache: "no-store", signal: controller.signal },
       );
       if (!response.ok) throw new Error("No fue posible consultar los números disponibles. Intenta de nuevo.");
@@ -2849,7 +2895,9 @@ function loadQuickPackageAvailability(slug, raffleId) {
 
 function prefetchQuickPackages(site, slug) {
   asArray(site?.activeRaffles).filter(shouldShowQuickPackages).slice(0, 2).forEach(raffle => {
-    void loadQuickPackageAvailability(slug, raffle.campaign.id).catch(() => {});
+    const quantity = getRafflePricingStrategy(raffle) === "paquetes_fijos" ? getQuickPackageOptions(raffle)[0]?.quantity : 0;
+    if (quantity > 500) return;
+    void loadQuickPackageAvailability(slug, raffle.campaign.id, quantity).catch(() => {});
   });
 }
 
@@ -2890,9 +2938,10 @@ async function openQuickPackagePayment(raffleId, quantity, retry = false) {
 }
 
 async function prepareQuickPackageNumbers(raffle, pack, slug, raffleId, requestId) {
-  const key = `${slug}:${raffleId}`;
+  const fixedPackages = getRafflePricingStrategy(raffle) === "paquetes_fijos";
+  const key = `${slug}:${raffleId}${fixedPackages ? `:${pack.quantity}` : ""}`;
   try {
-    const payload = await loadQuickPackageAvailability(slug, raffleId);
+    const payload = await loadQuickPackageAvailability(slug, raffleId, fixedPackages ? pack.quantity : 0);
     if (!paymentModalState.open || paymentModalState.requestId !== requestId) return;
     publicQuickAvailability.delete(key);
     const current = payload?.raffle || {};
@@ -2906,15 +2955,25 @@ async function prepareQuickPackageNumbers(raffle, pack, slug, raffleId, requestI
         payment_instructions: current.paymentInstructions || current.payment_instructions || raffle.campaign.paymentInstructions || "",
       },
     };
-    const required = pack.quantity * getRaffleSelectorCombinationSize(updatedRaffle);
-    const available = [...new Set(asArray(payload?.numbers).map(formatTicketSelectionLabel).filter(Boolean))];
-    if (required > RAFFLE_SELECTOR_LIMIT || available.length < required
+    const groupSize = getRaffleSelectorCombinationSize(updatedRaffle);
+    const required = pack.quantity * groupSize;
+    const groups = fixedPackages ? asArray(payload?.numbers).map(ticket => asArray(ticket.numbers).map(normalizeTicketDisplayValue).filter(Boolean)) : [];
+    const available = fixedPackages ? groups.flat() : [...new Set(asArray(payload?.numbers).map(formatTicketSelectionLabel).filter(Boolean))];
+    if ((fixedPackages
+          ? !payload?.randomPackage || pack.quantity > 500 || groups.length !== pack.quantity || groups.some(group => group.length !== groupSize)
+            || new Set(available).size !== available.length
+          : required > RAFFLE_SELECTOR_LIMIT)
+        || available.length < required
         || (getRaffleSelectorAutoConfig(updatedRaffle).public_support_upload && pack.quantity !== 1)) {
       throw new Error("No hay suficientes números disponibles para este paquete. Elige otro paquete o intenta de nuevo.");
     }
-    for (let index = available.length - 1; index > 0; index -= 1) {
-      const randomIndex = Math.floor(Math.random() * (index + 1));
-      [available[index], available[randomIndex]] = [available[randomIndex], available[index]];
+    // Fixed packages are randomized by the backend as whole tickets. Preserve
+    // their number groups; shuffling flat numbers would split physical tickets.
+    if (!fixedPackages) {
+      for (let index = available.length - 1; index > 0; index -= 1) {
+        const randomIndex = Math.floor(Math.random() * (index + 1));
+        [available[index], available[randomIndex]] = [available[randomIndex], available[index]];
+      }
     }
     paymentModalState.raffle = updatedRaffle;
     paymentModalState.selected = available.slice(0, required);
@@ -3172,6 +3231,9 @@ function refreshPaymentModalActionState() {
   if (!modal) return;
   const selectionSummary = getRaffleSelectorSelectionSummary(paymentModalState.raffle || {}, paymentModalState.selected);
   const supportUploadMode = Boolean(paymentModalState.raffle?.campaign?.ticket_auto_config?.public_support_upload);
+  const priceReady = paymentModalState.preparingPackage
+    ? getRafflePriceForQuantity(paymentModalState.raffle, paymentModalState.raffle?.quickPackage?.quantity) !== null
+    : selectionSummary.total !== null;
   const ready = Boolean(
     paymentModalState.open
     && !paymentModalState.loading
@@ -3179,6 +3241,7 @@ function refreshPaymentModalActionState() {
     && String(paymentModalState.customerCity || "").trim()
     && String(paymentModalState.customerPhone || "").trim()
     && (selectionSummary.isComplete || (paymentModalState.preparingPackage && paymentModalState.raffle?.quickPackage))
+    && (priceReady || supportUploadMode)
     && (!supportUploadMode || (paymentModalState.preparingPackage ? paymentModalState.raffle?.quickPackage?.quantity === 1 : selectionSummary.completeTickets === 1))
   );
 
@@ -3202,7 +3265,11 @@ function renderPaymentModalContent() {
   const description = raffle
     ? (getRaffleDisplayDescription(raffle) || "Contin·a con tu pago con el método que prefieras.")
     : "Contin·a con tu pago con el método que prefieras.";
-  const total = Number(paymentModalState.amount || getPaymentModalSelectionTotal(raffle, selected) || 0);
+  const total = getRafflePricingStrategy(raffle) === "paquetes_fijos"
+    ? paymentModalState.preparingPackage
+      ? getRaffleFixedPackagePrice(raffle, raffle?.quickPackage?.quantity)
+      : selectionSummary.total
+    : Number(paymentModalState.amount || getPaymentModalSelectionTotal(raffle, selected) || 0);
   const purchaseSummary = raffle?.quickPackage
     ? `Paquete de ${raffle.quickPackage.quantity}`
     : selectionSummary.isComplete
@@ -3228,14 +3295,15 @@ function renderPaymentModalContent() {
   const isContactReady = Boolean((selectionSummary.isComplete || (paymentModalState.preparingPackage && raffle?.quickPackage)) && customerName && customerCity && customerPhone);
   const supportUploadMode = Boolean(raffle?.campaign?.ticket_auto_config?.public_support_upload);
   const isFidelitySingleTicketValid = !supportUploadMode || (paymentModalState.preparingPackage ? raffle?.quickPackage?.quantity === 1 : selectionSummary.completeTickets === 1);
-  const isDisabled = !isContactReady || paymentModalState.loading || !isFidelitySingleTicketValid;
+  const isPriceReady = total !== null || supportUploadMode;
+  const isDisabled = !isContactReady || paymentModalState.loading || !isFidelitySingleTicketValid || !isPriceReady;
   const supportLabel = getRaffleDisplayWhatsApp(site) ? `Soporte por WhatsApp: ${getRaffleDisplayWhatsApp(site)}` : "Soporte por WhatsApp";
   const paymentProgressMarkup = !raffle?.quickPackage && selected.length ? `
     <div class="payment-progress">
       <div class="payment-progress-row">
         <span class="payment-progress-chip is-active">${selectionSummary.totalNumbers} numero${selectionSummary.totalNumbers === 1 ? "" : "s"}</span>
         <span class="payment-progress-chip">${selectionSummary.completeTickets} boleta${selectionSummary.completeTickets === 1 ? "" : "s"} completa${selectionSummary.completeTickets === 1 ? "" : "s"}</span>
-        <span class="payment-progress-chip ${selectionSummary.isComplete ? "is-ready" : "is-warning"}">${selectionSummary.isComplete ? "Puedes pagar" : `Faltan ${selectionSummary.missingForNext}`}</span>
+        <span class="payment-progress-chip ${selectionSummary.isComplete && isPriceReady ? "is-ready" : "is-warning"}">${!selectionSummary.isComplete ? `Faltan ${selectionSummary.missingForNext}` : isPriceReady ? "Puedes pagar" : "Revisa los paquetes"}</span>
       </div>
       <div class="payment-progress-bar" aria-hidden="true">
         <span style="width: ${selectionSummary.groupSize > 0 ? Math.min(100, Math.round((selectionSummary.totalNumbers / selectionSummary.groupSize) * 100)) : 0}%"></span>
@@ -3269,7 +3337,7 @@ function renderPaymentModalContent() {
           </div>` : ""}
           <div class="payment-modal-total">
             <span>Total a pagar</span>
-            <strong>${escapeHtml(formatCOP(total))}</strong>
+            <strong>${escapeHtml(total === null ? "Cantidad sin paquete configurado" : formatCOP(total))}</strong>
           </div>
           ${selected.length && !selectionSummary.isComplete ? `
             <div class="payment-modal-pricing">
@@ -3596,11 +3664,24 @@ function applyQuickPackageSelection(availableNumbers = []) {
 function continueRaffleSelectionToPayment(quickPackage = null) {
   const raffle = raffleSelectorState.raffle || null;
   if (!raffle || raffleSelectorState.loading || raffleSelectorState.error) return;
+  if (getRafflePricingStrategy(raffle) === "paquetes_fijos") {
+    raffleSelectorState.notice = "Elige un paquete: sus números se asignan al azar.";
+    raffleSelectorState.noticeTone = "info";
+    paintRaffleSelector();
+    return;
+  }
   const selected = getCurrentRaffleSelection(raffle.campaign.id);
   if (!selected.length) return;
-  const summary = getRaffleSelectorSelectionSummary(raffle, selected);
+  const checkoutRaffle = quickPackage ? { ...raffle, quickPackage } : raffle;
+  const summary = getRaffleSelectorSelectionSummary(checkoutRaffle, selected);
   if (!summary.isComplete || (summary.supportUploadMode && summary.completeTickets !== 1)) {
     raffleSelectorState.notice = "Completa una selección válida de boletas para continuar al pago.";
+    raffleSelectorState.noticeTone = "warning";
+    paintRaffleSelector();
+    return;
+  }
+  if (summary.total === null && !summary.supportUploadMode) {
+    raffleSelectorState.notice = "La cantidad de boletas no coincide con los paquetes configurados. Revisa los precios y ajusta la selección.";
     raffleSelectorState.noticeTone = "warning";
     paintRaffleSelector();
     return;
@@ -3608,7 +3689,7 @@ function continueRaffleSelectionToPayment(quickPackage = null) {
   const site = raffleSelectorState.site || window.__PUBLIC_SITE_STATE__?.site || null;
   const slug = raffleSelectorState.slug || window.__PUBLIC_SITE_STATE__?.slug || "";
   closeRaffleSelector();
-  openPaymentModal({ site, slug, raffle: quickPackage ? { ...raffle, quickPackage } : raffle, selected });
+  openPaymentModal({ site, slug, raffle: checkoutRaffle, selected });
 }
 
 async function fetchRaffleSelectorNumbers({ silent = false } = {}) {
@@ -3723,6 +3804,22 @@ async function fetchRaffleSelectorNumbers({ silent = false } = {}) {
   }
 }
 
+function openFixedPackageSelector(raffle, site, slug, quantity = 0) {
+  clearRaffleSelectorTimers();
+  raffleSelectorState.requestId += 1;
+  Object.assign(raffleSelectorState, {
+    site, slug, raffle, selected: [], numbers: [], query: "", page: 1,
+    stats: null, pagination: null, loading: false, error: "", notice: "",
+    quickPackageQuantity: 0, open: true,
+  });
+  window.__PUBLIC_SITE_STATE__ = { site, slug, raffles: asArray(site?.activeRaffles) };
+  if (quantity && getQuickPackageOptions(raffle).some(pack => pack.quantity === quantity)) {
+    return openQuickPackagePayment(raffle.campaign.id, quantity);
+  }
+  syncRaffleSelectorModal();
+  paintRaffleSelector();
+}
+
 async function openRaffleSelector(raffleId, quickPackageQuantity = 0) {
   const fallbackSite = raffleSelectorState.site || window.__PUBLIC_SITE_STATE__?.site || null;
   const fallbackSlug = window.__PUBLIC_SITE_STATE__?.slug || raffleSelectorState.slug || getSlugFromLocation();
@@ -3746,6 +3843,9 @@ async function openRaffleSelector(raffleId, quickPackageQuantity = 0) {
       || null;
     if (!freshRaffle) {
       return;
+    }
+    if (getRafflePricingStrategy(freshRaffle) === "paquetes_fijos") {
+      return openFixedPackageSelector(freshRaffle, freshSite, fallbackSlug, requestedPackageQuantity);
     }
 
     raffleSelectorState.site = freshSite;
@@ -3785,6 +3885,10 @@ async function openRaffleSelector(raffleId, quickPackageQuantity = 0) {
       }
     }, 18000);
     return;
+  }
+
+  if (getRafflePricingStrategy(raffle) === "paquetes_fijos") {
+    return openFixedPackageSelector(raffle, site, fallbackSlug, requestedPackageQuantity);
   }
 
   raffleSelectorState.site = site;
@@ -3966,6 +4070,10 @@ async function submitPublicPseCheckout() {
   const supportUploadMode = Boolean(raffle?.campaign?.ticket_auto_config?.public_support_upload);
   const selected = asArray(paymentModalState.selected);
   const selectionSummary = getRaffleSelectorSelectionSummary(raffle, selected);
+  if (selectionSummary.total === null && !supportUploadMode) {
+    submitPublicPaymentStateNotice("La cantidad de boletas no coincide con los paquetes configurados. Ajusta la selección antes de pagar.", "warning");
+    return;
+  }
   if (!site || !slug || !raffle?.campaign?.id || !selected.length || paymentModalState.loading || !ensurePaymentModalContactReady() || !selectionSummary.isComplete) {
     submitPublicPaymentStateNotice("Completa nombre, ciudad y teléfono para continuar.", "warning");
     return;
@@ -4045,6 +4153,10 @@ async function submitPublicReceiptUpload(file = null) {
   const supportUploadMode = Boolean(raffle?.campaign?.ticket_auto_config?.public_support_upload);
   const selected = asArray(paymentModalState.selected);
   const selectionSummary = getRaffleSelectorSelectionSummary(raffle, selected);
+  if (selectionSummary.total === null && !supportUploadMode) {
+    submitPublicPaymentStateNotice("La cantidad de boletas no coincide con los paquetes configurados. Ajusta la selección antes de subir el comprobante.", "warning");
+    return;
+  }
   if (!site || !slug || !raffle?.campaign?.id || !selected.length || paymentModalState.loading || !file || !ensurePaymentModalContactReady() || !selectionSummary.isComplete) {
     return;
   }

@@ -33,7 +33,7 @@ function setup({ mobile = false, query = "", selected = ["007"], page = 1, group
   });
   // Exercise the real search, selection summary, pagination and both render branches.
   for (const name of [
-    "escapeHtml", "escapeAttr", "formatCOP", "normalizeTicketDisplayValue", "formatTicketSelectionLabel",
+    "escapeHtml", "escapeAttr", "formatCOP", "getRafflePricingStrategy", "normalizeTicketDisplayValue", "formatTicketSelectionLabel",
     "filterRaffleSelectorNumbers", "getRaffleSelectorNumbers", "getRaffleSelectorPagination",
     "getRaffleSelectorAutoConfig", "getRaffleSelectorCombinationSize", "getRaffleSelectorSelectionSummary",
     "getCurrentRaffleSelectionForRender", "buildSelectionMessage", "renderRaffleSelectorContent",

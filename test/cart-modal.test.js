@@ -45,7 +45,7 @@ function setup({ quantity = null, selected = ["01"], groupSize = 1, preparing = 
   // Only unrelated display metadata is stubbed; there is no network or payment call.
   for (const name of [
     "escapeHtml", "escapeAttr", "formatCOP", "getRafflePricingConfig", "getRafflePricingStrategy",
-    "getRafflePricingPackages", "getRafflePriceForQuantity", "getRaffleDisplayPrice", "formatRafflePricingSummary",
+    "getRafflePricingPackages", "getRaffleFixedPackagePrice", "getRafflePriceForQuantity", "getRaffleDisplayPrice", "formatRafflePricingSummary",
     "getRaffleSelectorAutoConfig", "getRaffleSelectorCombinationSize", "getRaffleSelectorSelectionSummary",
     "getPaymentModalSelectionTotal", "getPaymentInstructionsText", "renderPaymentInstructionsPanel",
     "getQuickPackageOptions", "shouldShowQuickPackages", "renderQuickPackageActions", "renderRaffles",
@@ -125,6 +125,19 @@ test("selección vacía no inventa un paquete y mantiene bloqueado el comprobant
   assert.equal(detail(html), "Aún no hay boletas seleccionadas.");
   assert.equal(total(html), "$0");
   assert.match(receiptButton(html), /\bdisabled\b/);
+});
+
+test("paquetes sin precio individual bloquea el pago y no muestra un total unitario guardado", () => {
+  const { ctx, raffle, state } = setup({ amount: 9000 });
+  raffle.campaign.pricingStrategy = "paquetes_fijos";
+  raffle.campaign.numberValue = 9000;
+  raffle.campaign.pricingConfig = { precio_unitario: 9000, packages: [{ quantity: 3, price: 20000 }] };
+  const html = ctx.renderPaymentModalContent();
+  assert.equal(total(html), "Cantidadsinpaqueteconfigurado");
+  assert.match(receiptButton(html), /\bdisabled\b/);
+  assert.match(html, /Revisa los paquetes/);
+  assert.doesNotMatch(html, /Puedes pagar/);
+  assert.equal(state.amount, 9000, "Render does not mutate a previously saved amount");
 });
 
 test("selecciones incompletas conservan advertencia, cálculo y bloqueo de pago", () => {

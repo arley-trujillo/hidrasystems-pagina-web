@@ -24,7 +24,7 @@ function setup() {
     paintPaymentModal:()=>calls.paint++,syncPaymentModal:()=>{},refreshPaymentModalActionState:()=>calls.refresh++,
     submitPublicPaymentStateNotice:message=>{state.notice=message;},
   });
-  for (const name of ["openQuickPackagePayment","prepareQuickPackageNumbers","awaitPackageBeforePayment","openPaymentModal","closePaymentModal"]) {
+  for (const name of ["getRafflePricingStrategy","openQuickPackagePayment","prepareQuickPackageNumbers","awaitPackageBeforePayment","openPaymentModal","closePaymentModal"]) {
     vm.runInContext(source.match(new RegExp("(?:async )?function " + name + "\\([^]*?\\n}"))[0],ctx);
   }
   return {ctx,state,calls,resolve,reject,raffle};

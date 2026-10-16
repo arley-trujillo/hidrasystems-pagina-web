@@ -38,7 +38,7 @@ function setup({ images = [extra, last], secondRaffle = false, video = "" } = {}
   for (const name of [
     "escapeHtml", "escapeAttr", "pickHeroImage", "pickHeroVideo", "getRaffleDisplayTitle", "getRaffleDisplayDescription",
     "resolvePublicSiteImageUrls", "getRaffleDisplayImage", "getRaffleDisplayImages", "renderRaffleImageNavigation",
-    "updateRaffleGalleryImage", "changeRaffleImage", "renderRaffles", "renderShell",
+    "updateRaffleGalleryImage", "changeRaffleImage", "getRafflePricingStrategy", "renderRaffles", "renderShell",
     "applyDeferredImageSource", "applyDeferredPublicMedia",
   ]) {
     const match = source.match(new RegExp("function " + name + "\\([^]*?\\n}"));

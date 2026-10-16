@@ -22,7 +22,7 @@ function setup({enabled = true, rendered = true} = {}) {
     }},
     openRaffleSelector: id => calls.manual.push(id),
   });
-  for (const name of ["shouldShowQuickPackages", "openHeroRafflePurchase"]) {
+  for (const name of ["getRafflePricingStrategy", "shouldShowQuickPackages", "openHeroRafflePurchase"]) {
     vm.runInContext(source.match(new RegExp("function " + name + "\\([^]*?\\n}"))[0], ctx);
   }
   return {ctx, calls, panel};
