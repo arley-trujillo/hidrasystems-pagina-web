@@ -1435,6 +1435,19 @@ function whatsappLink(number) {
   return digits ? `https://wa.me/${digits}` : "#";
 }
 
+function renderPublicWhatsAppButton(site) {
+  const href = whatsappLink(getRaffleDisplayWhatsApp(site));
+  if (href === "#") return "";
+  return `
+    <div class="public-chat">
+      <a class="public-whatsapp-launcher" href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer"
+        aria-label="Contactar por WhatsApp" title="Contactar por WhatsApp">
+        ${socialIconMarkup("whatsapp")}
+      </a>
+    </div>
+  `;
+}
+
 function renderPublicChatWidget(site, slug) {
   const companyName = site?.company?.nombre || site?.settings?.title || "Atencion en linea";
   return `
@@ -6163,7 +6176,7 @@ function renderShell(site, slug) {
         ${renderReceiptUploadModal()}
         ${renderDeliveryModal()}
         ${renderRaffleResultsModal()}
-        ${renderPublicChatWidget(site, slug)}
+        ${renderPublicWhatsAppButton(site)}
       <div id="video-modal" class="video-modal" role="dialog" aria-modal="true" aria-hidden="true" onclick="if (event.target.id === 'video-modal') { closeVideoModal(); }">
         <div class="video-modal-card" role="document">
           <button type="button" class="video-modal-close" aria-label="Cerrar video" onclick="closeVideoModal()">·</button>

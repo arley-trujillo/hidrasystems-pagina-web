@@ -5855,6 +5855,22 @@ button {
   }
 }
 
+.public-whatsapp-launcher {
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #128c4a;
+  color: #fff;
+  text-decoration: none;
+  box-shadow: 0 6px 20px rgba(8, 25, 47, 0.25);
+}
+.public-whatsapp-launcher:hover { background: #0d713c; }
+.public-whatsapp-launcher:focus-visible { outline: 3px solid #123c3a; outline-offset: 4px; }
+.public-whatsapp-launcher svg { display: block; width: 34px; height: 34px; }
+
 .public-chat {
   position: fixed;
   right: 22px;
