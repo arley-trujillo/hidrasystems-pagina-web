@@ -776,12 +776,18 @@ function getRaffleAdvanceStats(site = {}) {
   const processed = Math.max(0, sold + reserved);
   const percent = total > 0 ? Math.min(100, Math.max(0, (processed / total) * 100)) : 0;
   const displayPercent = Math.round(percent * 10) / 10;
+  const config = site?.publicConfig || site?.public_config || {};
+  const manualValue = config.manualProgressPercent ?? config.manual_progress_percent;
+  const manual = (config.manualProgressEnabled ?? config.manual_progress_enabled) === true
+    && manualValue !== null && manualValue !== undefined && String(manualValue).trim() !== ""
+    && Number.isFinite(Number(manualValue)) && Number(manualValue) >= 0 && Number(manualValue) <= 100;
   return {
     total,
     sold,
     reserved,
     processed,
-    percent: displayPercent,
+    percent: manual ? Math.round(Number(manualValue) * 100) / 100 : displayPercent,
+    manual,
   };
 }
 
@@ -806,7 +812,7 @@ function renderRaffleAdvanceBlock(raffle = {}, options = {}) {
         <span class="raffle-progress-fill" data-raffle-progress-fill style="width: ${advance.percent}%; min-width: ${advance.percent > 0 ? "4px" : "0"}"></span>
       </div>
       <div class="raffle-progress-meta" data-raffle-progress-meta>
-        ${total ? `${escapeHtml(String(advance.percent))}% de avance` : "Cargando avance del sorteo..."}
+        ${total || advance.manual ? `${escapeHtml(String(advance.percent))}% de avance` : "Cargando avance del sorteo..."}
       </div>
     </div>
   `;
@@ -6194,6 +6200,9 @@ async function refreshFeaturedRaffleAdvance(site, slug) {
     .filter(Boolean))];
 
   await Promise.all(campaignIds.map(async (campaignId) => {
+    const raffle = asArray(site?.activeRaffles).find(item => String(item.campaign?.id || "") === campaignId);
+    // La actualización de ventas reales no reemplaza el porcentaje configurado.
+    if (getRaffleAdvanceStats(raffle).manual) return;
     const progressRoots = [...app.querySelectorAll(
       `[data-raffle-progress][data-raffle-id="${CSS.escape(campaignId)}"]`,
     )];
