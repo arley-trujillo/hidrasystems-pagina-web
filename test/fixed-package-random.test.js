@@ -47,6 +47,7 @@ function setup({ quantity = 20, groupSize = 1, cached = true } = {}) {
     setInterval: () => { throw Error("Fixed packages must not poll the manual grid"); },
   });
   load(ctx, [
+    "getPaymentInstructionsText",
     "escapeHtml", "escapeAttr", "getRafflePricingConfig", "getRafflePricingStrategy", "getRafflePricingPackages",
     "getRaffleFixedPackagePrice", "getRafflePriceForQuantity", "getRaffleDisplayPrice", "getRafflePricingBadge",
     "formatRafflePricingSummary", "getQuickPackageOptions", "shouldShowQuickPackages", "renderQuickPackageActions",

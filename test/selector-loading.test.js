@@ -36,6 +36,7 @@ function setup({ page = 1, query = "", quickPackageQuantity = 0 } = {}) {
   });
   const match = source.match(/async function fetchRaffleSelectorNumbers\([^]*?\n}/);
   assert.ok(match);
+  vm.runInContext(source.match(/function getPaymentInstructionsText\([^]*?\n}/)[0], ctx);
   vm.runInContext(match[0], ctx);
   return { ctx, state, calls };
 }
@@ -50,6 +51,19 @@ function response(number = "051", page = 2) {
     }),
   };
 }
+
+test("selector manual toma las instrucciones actuales, incluso si quedaron vacías", async () => {
+  for (const instructions of ["Cuenta del sorteo seleccionado", null]) {
+    const {ctx,state,calls}=setup();
+    state.raffle.campaign.instrucciones_pago="Cuenta anterior";
+    const pending=ctx.fetchRaffleSelectorNumbers();
+    calls.requests[0].resolve({ok:true,json:async()=>({raffle:{id:7,paymentInstructions:instructions},numbers:[{number:"01"}]})});
+    await pending;
+    assert.equal(state.error,"");
+    assert.equal(ctx.getPaymentInstructionsText(state.raffle),instructions || "");
+    assert.equal(state.raffle.campaign.instrucciones_pago,instructions || "");
+  }
+});
 
 test("usa páginas manuales de 50 y búsqueda de 250 ms sin reducir el límite de paquetes", () => {
   assert.equal(constant("RAFFLE_SELECTOR_PAGE_SIZE"), 50);

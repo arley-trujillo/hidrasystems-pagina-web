@@ -28,7 +28,7 @@ function setup({ images = [extra, last], secondRaffle = false, video = "" } = {}
     getRaffleDisplayTotal: () => 100, renderRaffleAdvanceBlock: () => "",
     renderQuickPackageActions: () => '<button type="button" data-raffle-package="0" data-raffle-id="7">Paquete de 1</button>',
     getFooterSocialLinks: () => [], renderInlineVideo: () => '<video data-preserved-video></video>',
-    renderHowItWorks: () => "", renderFaq: () => "", renderPublicChatWidget: () => "",
+    renderHowItWorks: () => "", renderFaq: () => "", renderPublicChatWidget: () => "", renderPublicWhatsAppButton: () => "",
     renderRaffleSelectorModal: () => "", renderPaymentModal: () => "", renderReceiptUploadModal: () => "",
     renderDeliveryModal: () => "", renderRaffleResultsModal: () => "",
     writeCachedPublicSite() {}, initRaffleCarousel() {}, syncRaffleResultsModal() {}, initializePublicChat() {},

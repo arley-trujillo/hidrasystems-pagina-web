@@ -183,6 +183,29 @@ test("Datos del comprador conserva encabezado y formulario sin el icono de conta
   assert.match(retailRenderer[0], /payment-action-icon-contact/);
 });
 
+test("instrucciones usa los campos del API del sorteo, nunca textos generales o de publicación", () => {
+  const {ctx,state,raffle}=setup();
+  state.site.settings.instrucciones_pago="Cuenta general incorrecta";
+  state.site.instrucciones_pago="Texto del sitio";
+  raffle.publicConfig.instrucciones_pago="Cuenta de publicación incorrecta";
+  raffle.instrucciones_pago="Texto alterno";
+  raffle.campaign.paymentInstructions="Cuenta actual\nReferencia <sorteo>";
+  let html=ctx.renderPaymentModalContent();
+  assert.match(html, /<p>Cuenta actual<\/p>\s*<p>Referencia &lt;sorteo&gt;<\/p>/);
+  assert.doesNotMatch(html, /Cuenta general incorrecta|Cuenta de publicación incorrecta|Texto del sitio|Texto alterno|Conserva el comprobante/);
+  assert.match(html, /Estas instrucciones corresponden al sorteo seleccionado\./);
+  for (const empty of [null, "", "   "]) {
+    raffle.campaign.paymentInstructions=empty;
+    html=ctx.renderPaymentModalContent();
+    assert.match(html, /Aun no hay instrucciones de pago configuradas/);
+    assert.doesNotMatch(html, /Cuenta actual|Cuenta general incorrecta|Conserva el comprobante/);
+  }
+  raffle.campaign={payment_instructions:"Alias del API"};
+  assert.equal(ctx.getPaymentInstructionsText(raffle),"Alias del API");
+  raffle.campaign={};
+  assert.equal(ctx.getPaymentInstructionsText(raffle,state.site),"");
+});
+
 test("Instrucciones de pago conserva títulos y contenido configurado o vacío sin icono separado", () => {
   for (const instructions of ["Conserva el comprobante de tu pago.", ""]) {
     const { ctx, raffle } = setup();

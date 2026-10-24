@@ -2115,19 +2115,13 @@ function listFromConfig(config = {}) {
   return [];
 }
 
-function getPaymentInstructionsText(raffle = {}, site = {}) {
-  const candidates = [
-    raffle?.campaign?.instrucciones_pago,
-    site?.settings?.instrucciones_pago,
-    raffle?.publicConfig?.instrucciones_pago,
-    raffle?.instrucciones_pago,
-    site?.instrucciones_pago,
-  ];
-
-  for (const candidate of candidates) {
-    const text = String(candidate || "").trim();
-    if (text) {
-      return text;
+function getPaymentInstructionsText(raffle = {}) {
+  // All aliases refer only to the selected raffle's commercial settings.
+  // An explicitly empty API value must not revive old instructions.
+  const campaign = raffle?.campaign || {};
+  for (const key of ["paymentInstructions", "payment_instructions", "instrucciones_pago"]) {
+    if (Object.prototype.hasOwnProperty.call(campaign, key)) {
+      return String(campaign[key] || "").trim();
     }
   }
 
@@ -2988,14 +2982,18 @@ async function prepareQuickPackageNumbers(raffle, pack, slug, raffleId, requestI
     if (!paymentModalState.open || paymentModalState.requestId !== requestId) return;
     publicQuickAvailability.delete(key);
     const current = payload?.raffle || {};
+    const instructionsUpdated = ["paymentInstructions", "payment_instructions", "instrucciones_pago"]
+      .some(key => Object.prototype.hasOwnProperty.call(current, key));
+    const paymentInstructions = getPaymentInstructionsText(instructionsUpdated ? { campaign: current } : raffle);
     const updatedRaffle = {
       ...raffle, quickPackage: pack,
       campaign: {
         ...raffle.campaign,
         ticketAutoConfig: current.ticketAutoConfig || getRaffleSelectorAutoConfig(raffle),
         ticket_auto_config: current.ticketAutoConfig || getRaffleSelectorAutoConfig(raffle),
-        paymentInstructions: current.paymentInstructions || current.payment_instructions || raffle.campaign.paymentInstructions || "",
-        payment_instructions: current.paymentInstructions || current.payment_instructions || raffle.campaign.paymentInstructions || "",
+        instrucciones_pago: paymentInstructions,
+        paymentInstructions,
+        payment_instructions: paymentInstructions,
       },
     };
     const groupSize = getRaffleSelectorCombinationSize(updatedRaffle);
@@ -3036,7 +3034,7 @@ async function prepareQuickPackageNumbers(raffle, pack, slug, raffleId, requestI
   paymentModalState.preparingPackage = false;
   if (!paymentModalState.error) {
     const instructions = document.querySelector("#payment-modal-content [data-payment-instructions]");
-    if (instructions) instructions.innerHTML = renderPaymentInstructionsPanel(getPaymentInstructionsText(paymentModalState.raffle, paymentModalState.site));
+    if (instructions) instructions.innerHTML = renderPaymentInstructionsPanel(getPaymentInstructionsText(paymentModalState.raffle));
     refreshPaymentModalActionState();
     return true;
   }
@@ -3304,7 +3302,7 @@ function renderPaymentModalContent() {
     ? `Paquete de ${raffle.quickPackage.quantity} ${getRafflePricingStrategy(raffle) === "paquetes_fijos" ? 'números al azar' : 'boletas con números al azar'}.`
     : "Selecciona numeros antes de pagar.";
   const selectionSummary = getRaffleSelectorSelectionSummary(raffle, selected);
-  const paymentInstructions = getPaymentInstructionsText(raffle, site);
+  const paymentInstructions = getPaymentInstructionsText(raffle);
   const title = raffle ? getRaffleDisplayTitle(raffle) : "Pago";
   const description = raffle
     ? (getRaffleDisplayDescription(raffle) || "Contin·a con tu pago con el método que prefieras.")
@@ -3403,7 +3401,7 @@ function renderPaymentModalContent() {
             </div>
             <div class="payment-card-copy">
               <strong>Así debes realizar tu pago</strong>
-              <p>Esta información viene directamente de la configuraci·n del sorteo.</p>
+              <p>Estas instrucciones corresponden al sorteo seleccionado.</p>
             </div>
             <div data-payment-instructions>${renderPaymentInstructionsPanel(paymentInstructions)}</div>
           </div>
@@ -3800,9 +3798,9 @@ async function fetchRaffleSelectorNumbers({ silent = false } = {}) {
             ticket_registration_mode: payload.raffle.ticketRegistrationMode,
             ticket_auto_config: payload.raffle.ticketAutoConfig || {},
             ticketAutoConfig: payload.raffle.ticketAutoConfig || {},
-            instrucciones_pago: payload.raffle.paymentInstructions || payload.raffle.payment_instructions || "",
-            paymentInstructions: payload.raffle.paymentInstructions || payload.raffle.payment_instructions || "",
-            payment_instructions: payload.raffle.paymentInstructions || payload.raffle.payment_instructions || "",
+            instrucciones_pago: getPaymentInstructionsText({ campaign: payload.raffle }),
+            paymentInstructions: getPaymentInstructionsText({ campaign: payload.raffle }),
+            payment_instructions: getPaymentInstructionsText({ campaign: payload.raffle }),
             updated_at: payload.raffle.updatedAt,
           },
         }

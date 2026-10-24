@@ -24,11 +24,26 @@ function setup() {
     paintPaymentModal:()=>calls.paint++,syncPaymentModal:()=>{},refreshPaymentModalActionState:()=>calls.refresh++,
     submitPublicPaymentStateNotice:message=>{state.notice=message;},
   });
-  for (const name of ["getRafflePricingStrategy","openQuickPackagePayment","prepareQuickPackageNumbers","awaitPackageBeforePayment","openPaymentModal","closePaymentModal"]) {
+  for (const name of ["getPaymentInstructionsText","getRafflePricingStrategy","openQuickPackagePayment","prepareQuickPackageNumbers","awaitPackageBeforePayment","openPaymentModal","closePaymentModal"]) {
     vm.runInContext(source.match(new RegExp("(?:async )?function " + name + "\\([^]*?\\n}"))[0],ctx);
   }
   return {ctx,state,calls,resolve,reject,raffle};
 }
+
+test("paquetes actualiza las instrucciones del sorteo y respeta cuando se borran", async () => {
+  for (const value of ["Nueva cuenta del sorteo", "", null]) {
+    const {ctx,state,resolve,raffle}=setup();
+    raffle.campaign.instrucciones_pago="Cuenta antigua";
+    raffle.campaign.paymentInstructions="Cuenta antigua";
+    const preparation=ctx.openQuickPackagePayment(7,2);
+    state.customerName="Cliente";
+    resolve({raffle:{paymentInstructions:value,payment_instructions:value},numbers:[{number:"01"},{number:"02"}]});
+    assert.equal(await preparation,true);
+    assert.equal(ctx.getPaymentInstructionsText(state.raffle),value || "");
+    assert.equal(state.raffle.campaign.instrucciones_pago,value || "");
+    assert.equal(state.customerName,"Cliente");
+  }
+});
 
 test("abre pagos sin esperar números ni bloquear el formulario; no repinta los datos al terminar", async () => {
   const {ctx,state,calls,resolve}=setup();
