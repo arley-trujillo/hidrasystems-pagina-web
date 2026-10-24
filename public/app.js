@@ -769,6 +769,18 @@ function getRaffleDisplayTotal(raffle = {}) {
 }
 
 function getRaffleAdvanceStats(site = {}) {
+  const backendProgress = site?.displayProgress || site?.display_progress || null;
+  if (backendProgress && Number.isFinite(Number(backendProgress.percent))) {
+    const percent = Math.min(100, Math.max(0, Number(backendProgress.percent)));
+    return {
+      total: Number(backendProgress.inventory_total || 0),
+      sold: Number(backendProgress.sold_count || 0),
+      reserved: Number(backendProgress.reserved_count || 0),
+      processed: Number(backendProgress.processed_count || 0),
+      percent,
+      manual: backendProgress.source === "manual" || backendProgress.manual === true,
+    };
+  }
   const stats = site?.raffleStats || site?.stats || null;
   const total = Number(stats?.inventoryTotal || stats?.inventory_total || 0);
   const sold = Number(stats?.soldCount || stats?.sold_count || 0);

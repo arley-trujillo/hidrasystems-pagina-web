@@ -33,6 +33,28 @@ test('manual display can go up or down without changing inventory or actual sale
   }
 });
 
+test('the page uses the canonical backend progress before its rollout fallback', () => {
+  const ctx = context();
+  const input = {
+    stats,
+    publicConfig: { manualProgressEnabled: true, manualProgressPercent: 90 },
+    displayProgress: {
+      percent: 72,
+      source: 'automatic',
+      inventory_total: 1000,
+      sold_count: 620,
+      reserved_count: 100,
+      available_count: 280,
+      processed_count: 720,
+    },
+  };
+  const result = ctx.getRaffleAdvanceStats(input);
+  assert.equal(result.percent, 72);
+  assert.equal(result.sold, 620);
+  assert.equal(result.reserved, 100);
+  assert.equal(result.processed, 720);
+});
+
 test('manual percentage renders immediately even before real statistics arrive', () => {
   const ctx = context();
   const input = raffle(45);
