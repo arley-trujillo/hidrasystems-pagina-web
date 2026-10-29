@@ -293,6 +293,11 @@ const receiptUploadState = {
 };
 
 const deliveryModalState = {
+  summary: null,
+  paymentStatus: 'review',
+  deliveryStatus: 'not_ready',
+  pollTimer: null,
+  pollCount: 0,
   open: false,
   loading: false,
   site: null,
@@ -3132,6 +3137,9 @@ function syncDeliveryModal() {
 }
 
 function closeDeliveryModal() {
+  window.clearTimeout(deliveryModalState.pollTimer);
+  deliveryModalState.pollTimer = null;
+  deliveryModalState.summary = null;
   deliveryModalState.open = false;
   deliveryModalState.loading = false;
   deliveryModalState.site = null;
@@ -3239,7 +3247,12 @@ async function loadPublicDeliveryAssets() {
   }
 }
 
-function openDeliveryModal({ site = null, slug = "", raffle = null, paymentReference = "", customerPhone = "" } = {}) {
+function openDeliveryModal({ site = null, slug = "", raffle = null, paymentReference = "", customerPhone = "", summary = null, paymentStatus = 'approved', deliveryStatus = 'processing' } = {}) {
+  window.clearTimeout(deliveryModalState.pollTimer);
+  deliveryModalState.summary = summary;
+  deliveryModalState.paymentStatus = paymentStatus;
+  deliveryModalState.deliveryStatus = deliveryStatus;
+  deliveryModalState.pollCount = 0;
   deliveryModalState.open = true;
   deliveryModalState.loading = false;
   deliveryModalState.site = site || null;
@@ -3257,7 +3270,37 @@ function openDeliveryModal({ site = null, slug = "", raffle = null, paymentRefer
   deliveryModalState.requestId += 1;
   paintDeliveryModal();
   syncDeliveryModal();
-  loadPublicDeliveryAssets();
+  void refreshPublicPurchaseStatus();
+}
+
+async function refreshPublicPurchaseStatus() {
+  const state = deliveryModalState;
+  if (!state.open || !state.slug || !state.raffle?.campaign?.id || !state.paymentReference || !state.customerPhone) return;
+  const requestId = state.requestId;
+  state.pollCount += 1;
+  try {
+    const params = new URLSearchParams({ reference: state.paymentReference, customer_phone: state.customerPhone });
+    const response = await fetch(`${API_BASE_URL}/public-site/${encodeURIComponent(state.slug)}/raffles/${encodeURIComponent(state.raffle.campaign.id)}/purchase-status?${params}`, {
+      cache: 'no-store', signal: AbortSignal.timeout(15000),
+    });
+    const payload = await readJsonResponse(response);
+    if (!response.ok) throw new Error('No se pudo actualizar el estado de la compra.');
+    if (!state.open || requestId !== state.requestId) return;
+    if (payload.reference !== state.paymentReference || !payload.summary) throw new Error('Respuesta de compra incompleta.');
+    state.summary = payload.summary;
+    state.paymentStatus = payload.payment_status;
+    state.deliveryStatus = payload.delivery_status;
+    state.notice = '';
+  } catch {
+    if (!state.open || requestId !== state.requestId) return;
+    state.notice = 'Tu compra quedó registrada. No vuelvas a pagar; estamos consultando el estado del envío.';
+    state.noticeTone = 'info';
+  }
+  if (!state.open || requestId !== state.requestId) return;
+  paintDeliveryModal();
+  if (state.pollCount < 60 && !['sent', 'pending_support'].includes(state.deliveryStatus) && state.paymentStatus !== 'rejected') {
+    state.pollTimer = window.setTimeout(() => void refreshPublicPurchaseStatus(), 3000);
+  }
 }
 
 function syncPaymentModal() {
@@ -3479,42 +3522,43 @@ function renderPaymentModal() {
 }
 
 function renderDeliveryModalContent() {
-  const raffle = deliveryModalState.raffle || paymentModalState.raffle || null;
-  const title = raffle ? `Recibe tus boletas de ${getRaffleDisplayTitle(raffle)}` : "Recibe tus boletas";
-  const description = raffle
-    ? "El pago fue exitoso. Elige si quieres recibirlas por WhatsApp o descargarlas en tu celular."
-    : "El pago fue exitoso. Elige cómo deseas recibir tus boletas.";
-  const referenceChip = deliveryModalState.paymentReference
-    ? `<span class="delivery-reference-chip">Referencia ${escapeHtml(deliveryModalState.paymentReference)}</span>`
-    : "";
-  const notice = deliveryModalState.notice
-    ? `<div class="delivery-modal-notice delivery-modal-notice-${escapeHtml(deliveryModalState.noticeTone || "info")}">${escapeHtml(deliveryModalState.notice)}</div>`
-    : "";
-  const whatsappUrl = deliveryModalState.whatsappUrl || "";
-  const whatsappDisabled = !whatsappUrl || deliveryModalState.loading;
+  const summary = deliveryModalState.summary || {};
+  const approved = deliveryModalState.paymentStatus === 'approved';
+  const rejected = deliveryModalState.paymentStatus === 'rejected';
+  const sent = approved && deliveryModalState.deliveryStatus === 'sent';
+  const pendingSupport = approved && deliveryModalState.deliveryStatus === 'pending_support';
+  const title = approved ? '¡Compra confirmada!' : rejected ? 'Comprobante no aprobado' : 'Compra en revisión';
+  const description = sent
+    ? 'Tus boletas fueron enviadas automáticamente por WhatsApp al teléfono registrado.'
+    : pendingSupport
+      ? 'Tu pago está aprobado, pero el envío de las boletas necesita revisión del equipo. No vuelvas a pagar.'
+      : approved
+        ? 'Estamos enviando tus boletas automáticamente por WhatsApp. No necesitas pulsar ningún botón.'
+        : rejected
+          ? 'El comprobante no fue aprobado. Comunícate con el equipo para revisar tu compra.'
+          : 'Estamos revisando tu comprobante. Cuando sea aprobado, tus boletas se enviarán automáticamente por WhatsApp.';
+  const rows = [
+    ['Nombre', summary.customer_name || '—'],
+    ['Teléfono', summary.customer_phone || deliveryModalState.customerPhone || '—'],
+    ['Cantidad de boletas', summary.ticket_count ?? '—'],
+    ['Sorteo inscrito', summary.raffle_name || '—'],
+    [approved ? 'Valor pagado' : 'Estado del pago', approved && summary.amount_paid != null ? formatCOP(summary.amount_paid) : 'Sin aprobación confirmada'],
+  ];
   return `
     <div class="delivery-modal-head">
       <div class="delivery-modal-head-copy">
-        <span class="payment-card-kicker">Pago exitoso</span>
+        <span class="payment-card-kicker">Resumen de tu compra</span>
         <h3>${escapeHtml(title)}</h3>
-        <p>${escapeHtml(description)}</p>
-        ${referenceChip}
+        <p role="status">${escapeHtml(description)}</p>
+        <span class="delivery-reference-chip">Referencia ${escapeHtml(deliveryModalState.paymentReference)}</span>
       </div>
       <button type="button" class="selector-close" data-action="close-delivery-modal">Cerrar</button>
     </div>
-
-    ${notice}
-
-    <div class="delivery-choice-grid">
-      <div class="delivery-choice-card delivery-choice-whatsapp">
-        <div class="payment-action-icon payment-action-icon-whatsapp"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" style="width:1em;height:1em;display:block;"><path d="M20.2 3.8A10.6 10.6 0 0 0 2.3 15.7L1 22l6.4-1.7a10.6 10.6 0 0 0 5.1 1.3h0A10.6 10.6 0 0 0 20.2 3.8Zm-8 16.5h0a8.8 8.8 0 0 1-4.5-1.2l-.3-.2-3.8 1 1-3.7-.2-.4a8.8 8.8 0 1 1 7.8 4.5Zm5-6.5c-.3-.2-1.7-.9-1.9-1s-.3-.2-.4.2-.7 1-1 1.2-.4.2-.7 0a7.2 7.2 0 0 1-2.1-1.3 8 8 0 0 1-1.5-1.9c-.2-.4 0-.6.2-.8l.4-.5c.2-.2.2-.3.3-.5.1-.2 0-.4 0-.6 0-.2-.5-1.4-.7-1.9-.2-.5-.4-.4-.6-.4h-.5c-.2 0-.6.1-.9.4s-1.1 1.1-1.1 2.6 1.2 3 1.4 3.2c.2.2 2.1 3.2 5.1 4.4.7.3 1.2.5 1.7.7.7.2 1.3.2 1.7.1.5-.1 1.7-.7 1.9-1.4.2-.6.2-1.1.1-1.2 0-.1-.2-.2-.5-.4Z" fill="currentColor"/></svg></div>
-        <div class="payment-card-copy">
-          <strong>Enviar por WhatsApp</strong>
-          <p>Se abrirá WhatsApp con un mensaje que lleva tu c·digo de compra.</p>
-        </div>
-        <a class="button payment-whatsapp ${whatsappDisabled ? "is-disabled" : ""}" href="${escapeHtml(whatsappUrl || "#")}" target="_blank" rel="noreferrer" ${whatsappDisabled ? 'aria-disabled="true"' : ""}>Enviar por WhatsApp</a>
-      </div>
-    </div>
+    <dl class="purchase-summary">
+      ${rows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}
+    </dl>
+    ${deliveryModalState.notice ? `<div class="delivery-modal-notice" role="status">${escapeHtml(deliveryModalState.notice)}</div>` : ''}
+    <p class="card-copy">Puedes cerrar esta ventana. El envío no depende de que permanezcas en la página.</p>
   `;
 }
 
@@ -4264,7 +4308,7 @@ async function submitPublicReceiptUpload(file = null) {
         : "Tu compra quedo registrada y la seleccion fue limpiada.";
     raffleSelectorState.noticeTone = "success";
     paintRaffleSelector();
-    if (payload?.auto_approved && payload?.payment_reference) {
+    if (payload?.payment_reference) {
       const contactPayload = getPaymentModalContactPayload();
       const nextSite = site || window.__PUBLIC_SITE_STATE__?.site || null;
       const nextSlug = slug || window.__PUBLIC_SITE_STATE__?.slug || "";
@@ -4277,6 +4321,15 @@ async function submitPublicReceiptUpload(file = null) {
         raffle: nextRaffle,
         paymentReference: payload.payment_reference,
         customerPhone: contactPayload.customer_phone || contactPayload.customerPhone || "",
+        summary: payload.purchase_summary || {
+          customer_name: contactPayload.customer_name,
+          customer_phone: contactPayload.customer_phone,
+          ticket_count: selectionSummary.completeTickets,
+          raffle_name: getRaffleDisplayTitle(nextRaffle),
+          amount_paid: payload.auto_approved ? payload.amount : null,
+        },
+        paymentStatus: payload.auto_approved ? 'approved' : payload.validation?.decision === 'REJECTED' ? 'rejected' : 'review',
+        deliveryStatus: payload.delivery_status || (payload.auto_approved ? 'processing' : 'not_ready'),
       });
     } else {
       closeReceiptUploadModal();
