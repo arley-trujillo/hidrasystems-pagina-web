@@ -28,7 +28,7 @@ function setup({ images = [extra, last], secondRaffle = false, video = "" } = {}
     getRaffleDisplayTotal: () => 100, renderRaffleAdvanceBlock: () => "",
     renderQuickPackageActions: () => '<button type="button" data-raffle-package="0" data-raffle-id="7">Paquete de 1</button>',
     getFooterSocialLinks: () => [], renderInlineVideo: () => '<video data-preserved-video></video>',
-    renderHowItWorks: () => "", renderFaq: () => "", renderPublicChatWidget: () => "", renderPublicWhatsAppButton: () => "",
+    renderHowItWorks: () => "", renderWinnerVideos: () => '<div data-winner-videos></div>', renderFaq: () => "", renderPublicChatWidget: () => "", renderPublicWhatsAppButton: () => "",
     renderRaffleSelectorModal: () => "", renderPaymentModal: () => "", renderReceiptUploadModal: () => "",
     renderDeliveryModal: () => "", renderRaffleResultsModal: () => "",
     writeCachedPublicSite() {}, initRaffleCarousel() {}, syncRaffleResultsModal() {}, initializePublicChat() {},
@@ -174,6 +174,9 @@ test("hero incorpora galería sin cambiar Comprar y respeta video configurado", 
   for (const video of ["", "https://video.example.invalid/live"]) {
     const { ctx, app, site } = setup({ video });
     ctx.renderShell(site, "test");
+    assert.match(app.innerHTML, /id="videos"/);
+    assert.match(app.innerHTML, /data-winner-videos/);
+    assert.match(app.innerHTML, />Ganadores<\/a>/);
     const hero = app.innerHTML.match(/<section class="hero[^]*?<\/section>/)?.[0];
     assert.ok(hero);
     assert.match(hero, /js-start-hero-purchase hero-buy-button/);

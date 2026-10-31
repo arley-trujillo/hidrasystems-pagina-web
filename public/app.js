@@ -6061,6 +6061,7 @@ function renderShell(site, slug) {
     ["Inicio", "#inicio"],
     ["Sorteos", "#sorteos"],
     ["Cómo participar", "#como-participar"],
+    ["Ganadores", "#videos"],
     ["Ayuda", "#faq"],
   ];
   const topNavLinks = footerQuickLinks;
@@ -6172,6 +6173,16 @@ function renderShell(site, slug) {
           ${renderSections(site, paymentSections, "Metodos de pago", "Bloques administrables desde el panel.") }
           </section>
         ` : ""}
+
+        <section class="section shell section-anchor" id="videos">
+          <div class="section-head">
+            <div>
+              <h2>Videos y testimonios</h2>
+              <p>Mira entregas, testimonios y apoyos sociales que el administrador decida publicar.</p>
+            </div>
+          </div>
+          ${renderWinnerVideos(site)}
+        </section>
 
           <section class="section shell section-anchor" id="faq">
             <div class="section-head">
