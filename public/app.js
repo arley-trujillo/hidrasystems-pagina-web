@@ -783,7 +783,7 @@ function getRaffleAdvanceStats(site = {}) {
       reserved: Number(backendProgress.reserved_count || 0),
       processed: Number(backendProgress.processed_count || 0),
       percent,
-      manual: backendProgress.source === "manual" || backendProgress.manual === true,
+      manual: ['manual', 'mixed'].includes(backendProgress.source) || backendProgress.manual === true,
     };
   }
   const stats = site?.raffleStats || site?.stats || null;
@@ -798,12 +798,15 @@ function getRaffleAdvanceStats(site = {}) {
   const manual = (config.manualProgressEnabled ?? config.manual_progress_enabled) === true
     && manualValue !== null && manualValue !== undefined && String(manualValue).trim() !== ""
     && Number.isFinite(Number(manualValue)) && Number(manualValue) >= 0 && Number(manualValue) <= 100;
+  const baseline = config.manualProgressBaselinePercent ?? config.manual_progress_baseline_percent;
+  const manualPercent = manual && total > 0 && baseline != null && Number.isFinite(Number(baseline))
+    ? Math.min(100, Math.max(0, Number(manualValue) + percent - Number(baseline))) : Number(manualValue);
   return {
     total,
     sold,
     reserved,
     processed,
-    percent: manual ? Math.round(Number(manualValue) * 100) / 100 : displayPercent,
+    percent: manual ? Math.round(manualPercent * 100) / 100 : displayPercent,
     manual,
   };
 }
@@ -6270,15 +6273,13 @@ function renderShell(site, slug) {
   });
 }
 
-async function refreshFeaturedRaffleAdvance(site, slug) {
+async function refreshFeaturedRaffleAdvance(site, slug, { isCurrent = () => true } = {}) {
   const campaignIds = [...new Set(asArray(site?.activeRaffles)
     .map((raffle) => String(raffle?.campaign?.id || ""))
     .filter(Boolean))];
 
   await Promise.all(campaignIds.map(async (campaignId) => {
     const raffle = asArray(site?.activeRaffles).find(item => String(item.campaign?.id || "") === campaignId);
-    // La actualización de ventas reales no reemplaza el porcentaje configurado.
-    if (getRaffleAdvanceStats(raffle).manual) return;
     const progressRoots = [...app.querySelectorAll(
       `[data-raffle-progress][data-raffle-id="${CSS.escape(campaignId)}"]`,
     )];
@@ -6289,28 +6290,32 @@ async function refreshFeaturedRaffleAdvance(site, slug) {
     try {
       const response = await fetch(
         `${API_BASE_URL}/public-site/${encodeURIComponent(slug)}/raffles/${encodeURIComponent(campaignId)}/availability?summary=1`,
+        { cache: 'no-store', signal: AbortSignal.timeout(12000) },
       );
       if (!response.ok) {
         return;
       }
 
-      const advance = getRaffleAdvanceStats(await response.json());
+      const payload = await response.json();
+      if (!isCurrent()) return;
+      const advance = getRaffleAdvanceStats(payload);
+      if (raffle) {
+        raffle.displayProgress = payload.displayProgress || payload.display_progress || null;
+        raffle.stats = payload.stats || raffle.stats;
+      }
       progressRoots.forEach((progressRoot) => {
         const fill = progressRoot.querySelector("[data-raffle-progress-fill]");
         const meta = progressRoot.querySelector("[data-raffle-progress-meta]");
 
         if (meta) {
-          meta.textContent = advance.total > 0
+          meta.textContent = advance.total > 0 || advance.manual
             ? `${advance.percent}% de avance`
             : "Avance del sorteo";
         }
 
         if (fill) {
-          fill.style.width = "0%";
           fill.style.minWidth = advance.percent > 0 ? "4px" : "0";
-          window.requestAnimationFrame(() => {
-            fill.style.width = `${advance.percent}%`;
-          });
+          fill.style.width = `${advance.percent}%`;
         }
       });
     } catch {
@@ -6318,6 +6323,31 @@ async function refreshFeaturedRaffleAdvance(site, slug) {
     }
   }));
 }
+
+let raffleAdvanceTimer = null;
+let raffleAdvanceGeneration = 0;
+function stopRaffleAdvanceRefresh() {
+  window.clearTimeout(raffleAdvanceTimer);
+  raffleAdvanceTimer = null;
+  raffleAdvanceGeneration += 1;
+}
+function startRaffleAdvanceRefresh(site, slug) {
+  stopRaffleAdvanceRefresh();
+  const generation = raffleAdvanceGeneration;
+  const isCurrent = () => generation === raffleAdvanceGeneration;
+  const tick = async () => {
+    if (!isCurrent()) return;
+    if (!document.hidden) await refreshFeaturedRaffleAdvance(site, slug, { isCurrent });
+    if (isCurrent()) raffleAdvanceTimer = window.setTimeout(tick, 30000);
+  };
+  void tick();
+}
+window.addEventListener('pagehide', stopRaffleAdvanceRefresh);
+window.addEventListener('pageshow', event => {
+  if (event.persisted && PUBLIC_SITE_MODE !== 'retail' && window.__PUBLIC_SITE_STATE__?.site) {
+    startRaffleAdvanceRefresh(window.__PUBLIC_SITE_STATE__.site, window.__PUBLIC_SITE_STATE__.slug);
+  }
+});
 
 app.addEventListener("click", (event) => {
   const raffleImageButton = event.target.closest("[data-raffle-image-step]");
@@ -7199,6 +7229,7 @@ async function loadRetailSite() {
 }
 
 async function loadSite() {
+  stopRaffleAdvanceRefresh();
   if (PUBLIC_SITE_MODE === "retail") {
     await loadRetailSite();
     return;
@@ -7228,7 +7259,7 @@ async function loadSite() {
     const site = await fetchPublicSitePayload(slug);
     renderShell(site, slug);
     prefetchQuickPackages(site, slug);
-    void refreshFeaturedRaffleAdvance(site, slug);
+    startRaffleAdvanceRefresh(site, slug);
     scheduleDeferredPublicMedia(site, slug);
   } catch (error) {
     app.innerHTML = `

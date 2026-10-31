@@ -6,6 +6,7 @@ import vm from 'node:vm';
 const source = fs.readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
 function context(extra = {}) {
   const ctx = vm.createContext({
+    AbortSignal,
     escapeHtml: String, getRaffleDisplayTitle: () => 'Prueba', getRaffleDisplayTotal: () => 0,
     asArray: value => Array.isArray(value) ? value : [], ...extra,
   });
@@ -75,7 +76,7 @@ test('disabled or invalid manual values keep automatic progress', () => {
   assert.equal(ctx.getRaffleAdvanceStats(input).percent, 15);
 });
 
-test('background refresh skips manual raffles and still updates automatic hero and card', async () => {
+test('background refresh updates mixed and automatic bars with current backend values', async () => {
   const requests = [];
   const roots = [0, 1].map(() => {
     const fill = { style: {} }, meta = {};
@@ -84,14 +85,55 @@ test('background refresh skips manual raffles and still updates automatic hero a
   const ctx = context({
     API_BASE_URL: 'https://example.test', CSS: { escape: String },
     window: { requestAnimationFrame: callback => callback() },
-    app: { querySelectorAll: selector => { assert.ok(selector.includes('"2"')); return roots; } },
-    fetch: async url => { requests.push(url); return { ok: true, json: async () => ({ stats }) }; },
+    app: { querySelectorAll: () => roots },
+    fetch: async (url,options) => { requests.push(url); assert.equal(options.cache,'no-store'); return { ok: true, json: async () => ({ stats,displayProgress:{percent:63.6,source:'mixed',inventory_total:1000} }) }; },
   });
   await ctx.refreshFeaturedRaffleAdvance({ activeRaffles: [raffle(80), { campaign: { id: 2 } }] }, 'test');
-  assert.equal(requests.length, 1);
-  assert.match(requests[0], /\/raffles\/2\/availability\?summary=1$/);
+  assert.equal(requests.length, 2);
+  assert.match(requests[0], /\/raffles\/1\/availability\?summary=1$/);
   for (const root of roots) {
-    assert.equal(root.fill.style.width, '15%');
-    assert.equal(root.meta.textContent, '15% de avance');
+    assert.equal(root.fill.style.width, '63.6%');
+    assert.equal(root.meta.textContent, '63.6% de avance');
   }
+});
+
+test('mixed fallback follows new sales and respects the manual starting point',()=>{
+  const ctx=context();const input=raffle(60);
+  input.publicConfig.manualProgressBaselinePercent=10;
+  assert.equal(ctx.getRaffleAdvanceStats(input).percent,65);
+  input.publicConfig.manualProgressPercent=40;
+  assert.equal(ctx.getRaffleAdvanceStats(input).percent,45);
+});
+
+test('stale or failed refresh preserves the visible progress',async()=>{
+  const fill={style:{width:'60.1%'}},meta={textContent:'60.1% de avance'};
+  const ctx=context({API_BASE_URL:'https://example.test',CSS:{escape:String},
+    app:{querySelectorAll:()=>[{querySelector:selector=>selector.includes('fill')?fill:meta}]},
+    fetch:async()=>({ok:true,json:async()=>({displayProgress:{percent:63.6,source:'mixed',inventory_total:1000}})}),
+  });
+  await ctx.refreshFeaturedRaffleAdvance({activeRaffles:[raffle(60.1)]},'test',{isCurrent:()=>false});
+  assert.equal(fill.style.width,'60.1%');
+  ctx.fetch=async()=>{throw Error('network');};
+  await ctx.refreshFeaturedRaffleAdvance({activeRaffles:[raffle(60.1)]},'test');
+  assert.equal(meta.textContent,'60.1% de avance');
+});
+
+test('refresh loop has one timer, pauses hidden tabs and ignores stopped in-flight requests',async()=>{
+  const timers=new Map();let seq=0;let requests=0;let complete;
+  const ctx=vm.createContext({document:{hidden:false},window:{
+    clearTimeout:id=>timers.delete(id),setTimeout:(fn,ms)=>{assert.equal(ms,30000);timers.set(++seq,fn);return seq;},
+  },refreshFeaturedRaffleAdvance:async(_site,_slug,options)=>{
+    requests++;await new Promise(resolve=>complete=resolve);return options.isCurrent();
+  }});
+  vm.runInContext('let raffleAdvanceTimer=null; let raffleAdvanceGeneration=0;',ctx);
+  for(const name of ['stopRaffleAdvanceRefresh','startRaffleAdvanceRefresh'])vm.runInContext(source.match(new RegExp('function '+name+'\\([^]*?\\n}'))[0],ctx);
+  ctx.startRaffleAdvanceRefresh({},'test');assert.equal(requests,1);
+  complete();await new Promise(setImmediate);assert.equal(timers.size,1);
+  ctx.document.hidden=true;
+  const tick=timers.values().next().value;timers.clear();await tick();
+  assert.equal(requests,1);assert.equal(timers.size,1);
+  ctx.document.hidden=false;
+  ctx.startRaffleAdvanceRefresh({},'test');assert.equal(timers.size,0);assert.equal(requests,2);
+  ctx.stopRaffleAdvanceRefresh();complete();await new Promise(setImmediate);
+  assert.equal(timers.size,0);
 });
